@@ -84,6 +84,20 @@ class FAISSStore:
         with self._lock:
             return self._index.ntotal
 
+    def reload(self) -> None:
+        """Re-read the index from disk, picking up vectors added by other processes.
+
+        The pipeline and API run as separate processes and each hold their own
+        in-memory FAISSStore. The pipeline writes to disk after every add(); the
+        API must call reload() before searching to see those new vectors.
+        """
+        path = self._config.faiss_path
+        with self._lock:
+            if os.path.exists(path):
+                self._index = faiss.read_index(path)
+            else:
+                self._index = faiss.IndexFlatIP(self._dim)
+
     def clear(self) -> None:
         """Reset the index to empty and overwrite the persisted file."""
         with self._lock:

@@ -332,3 +332,41 @@ def test_faiss_usable_after_clear(faiss_store):
     idx = faiss_store.add(_make_embedding(1))
     assert idx == 0  # sequential IDs restart from 0 after clear
     assert faiss_store.get_total() == 1
+
+
+def test_faiss_reload_picks_up_vectors_from_another_instance(tmp_path):
+    """Simulates pipeline (writer) and API (reader) as separate processes."""
+    config = StorageConfig(
+        faiss_path=str(tmp_path / "shared.index"),
+        embedding_dim=1536,
+    )
+    # Pipeline instance: adds vectors and persists to disk
+    writer = FAISSStore(config)
+    writer.init()
+    for i in range(3):
+        writer.add(_make_embedding(i))
+
+    # API instance: loaded at startup when index was empty
+    reader = FAISSStore(config)
+    reader.init()  # reloads from disk — should already see the 3 vectors
+
+    # Simulate pipeline adding more vectors AFTER the API started
+    writer.add(_make_embedding(99))
+
+    # Before reload, reader still sees 3
+    assert reader.get_total() == 3
+
+    # After reload, reader sees all 4
+    reader.reload()
+    assert reader.get_total() == 4
+
+
+def test_faiss_reload_when_no_file_creates_empty_index(tmp_path):
+    config = StorageConfig(
+        faiss_path=str(tmp_path / "missing.index"),
+        embedding_dim=1536,
+    )
+    store = FAISSStore(config)
+    store.init()
+    store.reload()  # file doesn't exist yet — must not raise
+    assert store.get_total() == 0

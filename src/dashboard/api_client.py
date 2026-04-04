@@ -57,7 +57,7 @@ class APIClient:
             f"{self._base_url}/search/similar",
             params={"modality": modality, "k": k},
             files={"file": (filename, file_bytes, content_type)},
-            timeout=30.0,
+            timeout=120.0,  # first call loads Wav2Vec2+DINOv2 (~60s); subsequent calls are fast
         )
         resp.raise_for_status()
         return resp.json()

@@ -98,7 +98,7 @@ def render(client: APIClient) -> None:
     if st.button("Buscar eventos similares", type="primary", key="sim_search_btn"):
         st.session_state.sim_results = None
         st.session_state.sim_error = None
-        with st.spinner("Codificando y buscando en el índice vectorial…"):
+        with st.spinner("Codificando y buscando en el índice vectorial… (la primera búsqueda carga los modelos, puede tardar ~60s)"):
             try:
                 st.session_state.sim_results = client.search_similar(
                     file_bytes=uploaded.getvalue(),
