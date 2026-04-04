@@ -85,13 +85,25 @@ class EventStore:
 
         return event_dir
 
+    def _validate_event_dir(self, event_dir: Path) -> None:
+        """Raise ValueError if event_dir is outside the configured events_dir."""
+        root = Path(self._config.events_dir).resolve()
+        try:
+            event_dir.resolve().relative_to(root)
+        except ValueError:
+            raise ValueError(
+                f"event_dir '{event_dir}' is outside the configured events directory '{root}'"
+            )
+
     def load_audio(self, event_dir: Path) -> tuple[np.ndarray, int]:
         """Load audio.wav. Returns (samples, sample_rate)."""
+        self._validate_event_dir(event_dir)
         data, sr = sf.read(str(event_dir / "audio.wav"), dtype="float32")
         return data, sr
 
     def load_frame(self, event_dir: Path) -> Optional[np.ndarray]:
         """Load frame.jpg as BGR array. Returns None if not present."""
+        self._validate_event_dir(event_dir)
         p = event_dir / "frame.jpg"
         if not p.exists():
             return None
@@ -99,16 +111,19 @@ class EventStore:
 
     def load_metadata(self, event_dir: Path) -> dict:
         """Load metadata.json."""
+        self._validate_event_dir(event_dir)
         return json.loads((event_dir / "metadata.json").read_text())
 
     def save_embedding(self, event_dir: Path, embedding: np.ndarray) -> Path:
         """Write embedding.npy to event_dir and return the file path."""
+        self._validate_event_dir(event_dir)
         path = event_dir / "embedding.npy"
         np.save(str(path), embedding)
         return path
 
     def load_embedding(self, event_dir: Path) -> Optional[np.ndarray]:
         """Load embedding.npy. Returns None if not present."""
+        self._validate_event_dir(event_dir)
         p = event_dir / "embedding.npy"
         if not p.exists():
             return None
@@ -116,5 +131,6 @@ class EventStore:
 
     def delete_event(self, event_dir: Path) -> None:
         """Remove the event directory and all its artifacts from the filesystem."""
+        self._validate_event_dir(event_dir)
         if event_dir.exists():
             shutil.rmtree(event_dir)

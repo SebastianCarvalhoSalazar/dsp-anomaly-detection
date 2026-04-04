@@ -39,11 +39,11 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
 
-    st.markdown(inject_global_css(), unsafe_allow_html=True)
+    st.html(inject_global_css())
 
     # ── Sidebar ──────────────────────────────────────────────────────────────
     with st.sidebar:
-        st.markdown("""
+        st.html("""
         <div style="padding:1.25rem 0 1rem; text-align:center;">
           <div style="font-size:2rem;">📡</div>
           <div style="color:white;font-weight:700;font-size:1.05rem;margin-top:4px;">
@@ -55,7 +55,7 @@ def main() -> None:
           </div>
         </div>
         <hr style="border-color:#1E293B;margin:0 0 1rem;">
-        """, unsafe_allow_html=True)
+        """)
 
         labels = list(PAGES.keys())
         icons  = [v[0] for v in PAGES.values()]
@@ -64,13 +64,13 @@ def main() -> None:
         choice_display = st.radio("Navegación", display, label_visibility="collapsed")
         choice = labels[display.index(choice_display)]
 
-        st.markdown("""
+        st.html("""
         <hr style="border-color:#1E293B;margin:1.5rem 0 1rem;">
         <div style="color:#475569;font-size:0.72rem;text-align:center;
                     letter-spacing:0.05em;text-transform:uppercase;">
           API: localhost:8000
         </div>
-        """, unsafe_allow_html=True)
+        """)
 
     # ── Main area ─────────────────────────────────────────────────────────────
     client = APIClient(base_url=API_BASE_URL)

@@ -313,9 +313,13 @@ Base URL: `http://localhost:8000`
 | `GET` | `/events/{id}/audio` | Stream del archivo WAV |
 | `GET` | `/events/{id}/frame` | Stream del JPEG |
 | `GET` | `/events/{id}/offline_analysis` | EMD + mel-spectrogram del audio del evento |
-| `POST` | `/search/similar` | Upload audio/imagen → top-k eventos similares por cosine |
+| `DELETE` | `/events/{id}` | Elimina un evento (DB + filesystem; entrada FAISS queda huérfana) |
+| `DELETE` | `/events/` | Elimina todos los eventos y resetea el índice FAISS |
+| `POST` | `/search/similar` | Upload audio/imagen → top-k eventos similares por cosine (máx. 10 MB) |
 | `WS` | `/ws/stream` | WebSocket: push de `AnomalyScoreMessage` en tiempo real |
 | `POST` | `/internal/score` | Usado internamente por el pipeline para broadcast WS |
+| `POST` | `/internal/reset-detector` | Señaliza al pipeline que resetee su `AnomalyDetector` |
+| `GET` | `/internal/reset-pending` | Polling del pipeline: retorna `{"pending": bool}` y limpia el flag |
 
 Documentación interactiva disponible en `http://localhost:8000/docs` (Swagger UI).
 
@@ -327,13 +331,16 @@ Cuatro páginas accesibles desde el sidebar:
 
 ### Live Monitor
 - Indicadores en tiempo real: anomaly score, estado del detector, fase de calentamiento
-- Historial de amplitud RMS (últimas 256 ventanas) vía `st.line_chart`
+- Historial de scores y amplitud RMS (últimas 256 ventanas) con Plotly
 - Actualización automática cada segundo via WebSocket
+- Botón **Reiniciar historial**: limpia los gráficos de la sesión actual
+- Botón **Reiniciar detector**: envía señal al pipeline para resetear el Isolation Forest (reinicia warmup)
 
 ### Event Feed
-- Lista de eventos con filtros por score mínimo y cantidad
+- Lista de eventos con filtros por score mínimo y orden
 - Reproducción de audio (`st.audio`) y visualización de frame (`st.image`) por evento
-- Score badge y timestamp por evento
+- Botón **Eliminar evento** por cada evento individual
+- Botón **Borrar todo**: elimina todos los eventos, filesystem y FAISS
 
 ### Similarity Search
 - Upload de archivo de audio o imagen

@@ -7,7 +7,7 @@ from typing import Literal
 import anyio
 import numpy as np
 import soundfile as sf
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 
 from src.api.dependencies import get_db, get_faiss_store
 from src.api.routers.events import _event_to_response
@@ -56,7 +56,13 @@ async def search_similar(
     faiss_store: FAISSStore = Depends(get_faiss_store),
 ) -> list[SimilarEventResponse]:
     """Search for the k most similar events to an uploaded audio or image file."""
-    file_bytes = await file.read()
+    _MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+    file_bytes = await file.read(_MAX_UPLOAD_BYTES + 1)
+    if len(file_bytes) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="File exceeds the 10 MB limit.",
+        )
 
     def _search() -> list[SimilarEventResponse]:
         if faiss_store.get_total() == 0:

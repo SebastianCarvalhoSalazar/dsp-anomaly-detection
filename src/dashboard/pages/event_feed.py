@@ -18,10 +18,10 @@ def _score_bar(score: float) -> str:
 
 
 def render(client: APIClient) -> None:
-    st.markdown(page_header(
+    st.html(page_header(
         "Eventos detectados",
         "Historial de anomalías capturadas con audio y evidencia visual",
-    ), unsafe_allow_html=True)
+    ))
 
     # ── Filters + acciones globales ──────────────────────────────────────────
     with st.container(border=True):
@@ -29,7 +29,7 @@ def render(client: APIClient) -> None:
         min_score = fc1.slider("Score mínimo", 0.0, 1.0, 0.0, step=0.05, label_visibility="visible")
         limit     = fc2.selectbox("Mostrar", [10, 25, 50, 100], index=1, label_visibility="visible")
         sort_desc = fc3.selectbox("Orden", ["Más recientes", "Mayor score"], label_visibility="visible")
-        fc4.markdown("<div style='height:1.6rem'></div>", unsafe_allow_html=True)
+        fc4.html("<div style='height:1.6rem'></div>")
         if fc4.button("Borrar todo", type="secondary", use_container_width=True):
             try:
                 client.clear_events()

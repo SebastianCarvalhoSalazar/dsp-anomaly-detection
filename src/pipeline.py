@@ -21,6 +21,8 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Optional
 
+import json
+
 import httpx
 import numpy as np
 import sounddevice as sd
@@ -119,8 +121,8 @@ class Pipeline:
                 self.detector.reset()
                 self._pre_audio_buffer.clear()
                 logger.info("Detector reset: buffer cleared, warmup restarted.")
-        except Exception:
-            pass  # API may not be running; reset polling is best-effort
+        except Exception as exc:
+            logger.debug("Reset poll failed (API may not be running): %s", exc)
 
     def _process_loop(self) -> None:
         """Consume audio windows, score them, and handle anomalies."""
@@ -184,7 +186,6 @@ class Pipeline:
         self.event_store.save_embedding(event_dir, embedding)
         faiss_id = self.faiss_store.add(embedding)
 
-        import json
         orm_event = AnomalyEvent(
             timestamp=ts,
             anomaly_score=result.anomaly_score,

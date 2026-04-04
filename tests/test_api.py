@@ -48,6 +48,12 @@ def client(tmp_stores):
         yield c
 
 
+@pytest.fixture
+def tmp_event_store_for_api(tmp_path):
+    config = StorageConfig(events_dir=str(tmp_path / "eventos"))
+    return EventStore(config)
+
+
 _event_counter = 0
 
 
@@ -303,3 +309,93 @@ def test_reset_pending_returns_true_then_clears(client):
 def test_reset_pending_is_false_by_default(client):
     resp = client.get("/internal/reset-pending")
     assert resp.json()["pending"] is False
+
+
+# ---------------------------------------------------------------------------
+# GET /events/{id}/offline_analysis
+# ---------------------------------------------------------------------------
+
+def test_offline_analysis_not_found(client):
+    resp = client.get("/events/9999/offline_analysis")
+    assert resp.status_code == 404
+
+
+def test_offline_analysis_returns_imfs_and_spectrogram(tmp_stores, tmp_path):
+    db, faiss_store, event_store = tmp_stores
+    app = create_app(db=db, faiss_store=faiss_store, event_store=event_store)
+    with TestClient(app) as c:
+        # Use a long-enough audio clip (2 seconds) so EMD can extract multiple IMFs
+        audio = np.random.randn(16000 * 2).astype(np.float32)
+        ts = datetime(2024, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
+        event_dir = event_store.save_event(ts, audio, 16000, frame=None, anomaly_score=0.8)
+        orm_event = AnomalyEvent(
+            timestamp=ts,
+            anomaly_score=0.8,
+            event_dir=str(event_dir),
+        )
+        event_id = db.save_event(orm_event)
+
+        resp = c.get(f"/events/{event_id}/offline_analysis")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "imfs" in data
+        assert "spectrogram" in data
+        assert "sample_rate" in data
+        assert data["sample_rate"] == 16000
+        assert data["n_imfs"] >= 1
+        assert len(data["imfs"]) == data["n_imfs"]
+        # Each IMF is a list of floats
+        assert isinstance(data["imfs"][0], list)
+        # Spectrogram has shape (n_mel_bands, n_frames)
+        assert len(data["spectrogram"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# POST /search/similar — file size limit
+# ---------------------------------------------------------------------------
+
+def test_search_similar_rejects_oversized_file(client):
+    oversized = b"x" * (10 * 1024 * 1024 + 1)  # 10 MB + 1 byte
+    resp = client.post(
+        "/search/similar?modality=audio&k=5",
+        files={"file": ("big.wav", oversized, "audio/wav")},
+    )
+    assert resp.status_code == 413
+
+
+# ---------------------------------------------------------------------------
+# EventStore — path traversal validation
+# ---------------------------------------------------------------------------
+
+def test_event_store_rejects_path_traversal(tmp_path):
+    from src.storage.config import StorageConfig
+    from src.storage.event_store import EventStore
+
+    config = StorageConfig(events_dir=str(tmp_path / "eventos"))
+    store = EventStore(config)
+
+    outside_path = tmp_path / ".." / "escape"
+    with pytest.raises(ValueError, match="outside the configured events directory"):
+        store.load_audio(outside_path)
+
+
+def test_event_store_rejects_absolute_outside_path(tmp_path):
+    from src.storage.config import StorageConfig
+    from src.storage.event_store import EventStore
+
+    config = StorageConfig(events_dir=str(tmp_path / "eventos"))
+    store = EventStore(config)
+
+    with pytest.raises(ValueError, match="outside the configured events directory"):
+        store.load_audio(Path("/tmp/evil"))
+
+
+def test_event_store_accepts_valid_subpath(tmp_event_store_for_api, tmp_path):
+    """Valid paths inside events_dir must NOT raise."""
+    from datetime import timezone
+    ts = datetime(2024, 8, 1, tzinfo=timezone.utc)
+    audio = np.zeros(1024, dtype=np.float32)
+    event_dir = tmp_event_store_for_api.save_event(ts, audio, 16000, None, anomaly_score=0.5)
+    # Must not raise
+    loaded, sr = tmp_event_store_for_api.load_audio(event_dir)
+    assert sr == 16000

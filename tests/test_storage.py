@@ -278,8 +278,24 @@ def test_event_store_delete_removes_directory(tmp_event_store, tmp_path):
 
 
 def test_event_store_delete_nonexistent_dir_is_noop(tmp_event_store, tmp_path):
-    fake_dir = Path(tmp_path) / "nonexistent"
-    tmp_event_store.delete_event(fake_dir)  # must not raise
+    # A non-existent path *inside* the events dir must not raise
+    inner = Path(tmp_path) / "eventos" / "nonexistent"
+    tmp_event_store.delete_event(inner)  # must not raise
+
+
+def test_event_store_validate_rejects_traversal(tmp_path):
+    config = StorageConfig(events_dir=str(tmp_path / "eventos"))
+    store = EventStore(config)
+    outside = tmp_path / ".." / "escape"
+    with pytest.raises(ValueError, match="outside the configured events directory"):
+        store.load_audio(outside)
+
+
+def test_event_store_validate_rejects_absolute_outside(tmp_path):
+    config = StorageConfig(events_dir=str(tmp_path / "eventos"))
+    store = EventStore(config)
+    with pytest.raises(ValueError, match="outside the configured events directory"):
+        store.load_embedding(Path("/tmp/evil"))
 
 
 # ---------------------------------------------------------------------------

@@ -79,10 +79,10 @@ def _spec_figure(spec: list[list[float]], sr: int) -> go.Figure:
 
 
 def render(client: APIClient) -> None:
-    st.markdown(page_header(
+    st.html(page_header(
         "Análisis offline",
         "Descomposición EMD e IMFs · Mel-spectrogram por evento",
-    ), unsafe_allow_html=True)
+    ))
 
     # ── Event selector ───────────────────────────────────────────────────────
     try:

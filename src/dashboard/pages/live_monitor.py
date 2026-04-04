@@ -1,4 +1,4 @@
-"""Live monitor — real-time anomaly score, waveform and status."""
+"""Live monitor — real-time anomaly score, status and history charts."""
 from __future__ import annotations
 
 import json
@@ -100,10 +100,10 @@ def _rms_chart(history: list[float]) -> go.Figure:
 
 
 def render(client: APIClient) -> None:
-    st.markdown(page_header(
+    st.html(page_header(
         "Monitor en vivo",
         "Scores de anomalía en tiempo real via WebSocket",
-    ), unsafe_allow_html=True)
+    ))
 
     # ── Session state ────────────────────────────────────────────────────────
     if "rms_history" not in st.session_state:
@@ -171,7 +171,7 @@ def render(client: APIClient) -> None:
         m3.metric("Detector", "Listo ✓" if is_fitted else "Calentando…")
         m4.metric("Pipeline", "Conectado" if connected else "Sin conexión")
 
-        st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+        st.html("<div style='height:0.5rem'></div>")
         rc1, rc2 = st.columns(2)
         if rc1.button("Reiniciar historial", use_container_width=True):
             st.session_state.score_history = deque([0.0] * _HISTORY, maxlen=_HISTORY)
@@ -187,12 +187,12 @@ def render(client: APIClient) -> None:
     st.divider()
 
     # ── Score history ────────────────────────────────────────────────────────
-    st.markdown(f"""
+    st.html(f"""
     <div style="font-size:0.78rem;font-weight:600;letter-spacing:0.06em;
          text-transform:uppercase;color:{PALETTE['muted']};margin-bottom:0.25rem;">
       Historial de anomaly score
     </div>
-    """, unsafe_allow_html=True)
+    """)
     st.plotly_chart(
         _score_chart(list(st.session_state.score_history), is_anomaly),
         use_container_width=True,
@@ -200,12 +200,12 @@ def render(client: APIClient) -> None:
     )
 
     # ── RMS amplitude ────────────────────────────────────────────────────────
-    st.markdown(f"""
+    st.html(f"""
     <div style="font-size:0.78rem;font-weight:600;letter-spacing:0.06em;
          text-transform:uppercase;color:{PALETTE['muted']};margin-bottom:0.25rem;">
       Amplitud RMS
     </div>
-    """, unsafe_allow_html=True)
+    """)
     st.plotly_chart(
         _rms_chart(list(st.session_state.rms_history)),
         use_container_width=True,

@@ -47,10 +47,10 @@ def _sim_card(event: dict, sim: float, client: APIClient) -> None:
 
 
 def render(client: APIClient) -> None:
-    st.markdown(page_header(
+    st.html(page_header(
         "Búsqueda por similitud",
         "Encuentra eventos similares usando embeddings multimodales (Wav2Vec2 + DINOv2)",
-    ), unsafe_allow_html=True)
+    ))
 
     # Persistir resultados y errores en session_state para sobrevivir reruns
     if "sim_results" not in st.session_state:

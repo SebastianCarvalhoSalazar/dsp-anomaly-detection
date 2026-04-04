@@ -43,18 +43,28 @@ Proceso principal síncrono. Orquesta todos los módulos de procesamiento.
 FastAPI async. Expone datos almacenados y recibe notificaciones del pipeline.
 
 - `POST /internal/score` — pipeline notifica scores; el router WebSocket los broadcast a todos los clientes conectados
+- `POST /internal/reset-detector` — activa flag `app.state.detector_reset_pending = True`
+- `GET /internal/reset-pending` — pipeline pollea este endpoint; retorna `{"pending": bool}` y limpia el flag (one-shot)
 - `GET /events/` — lista eventos con filtros (min_score, fecha, paginación)
 - `GET /events/{id}/audio|frame` — stream de archivos desde filesystem
 - `GET /events/{id}/offline_analysis` — corre EMD (PyEMD) + mel-spectrogram (librosa) sobre el audio del evento
-- `POST /search/similar` — recibe audio o imagen, genera embedding con `MultimodalEncoder`, busca k vecinos en FAISS, retorna metadata desde SQLite
+- `DELETE /events/{id}` — elimina DB row + filesystem; la entrada FAISS queda huérfana (ya es filtrada en búsqueda)
+- `DELETE /events/` — elimina todos los eventos y llama `FAISSStore.clear()`
+- `POST /search/similar` — recibe audio o imagen (máx. 10 MB), genera embedding con `MultimodalEncoder`, busca k vecinos en FAISS, retorna metadata desde SQLite
 - `WS /ws/stream` — WebSocket para el dashboard en tiempo real
 
-Instancias de `Database`, `FAISSStore` y `EventStore` se inyectan vía `request.app.state` (dependency injection en `dependencies.py`).
+Instancias de `Database`, `FAISSStore` y `EventStore` se inyectan vía `request.app.state` (dependency injection en `dependencies.py`). El startup usa `lifespan` context manager (FastAPI 0.93+).
 
 ### 3. Dashboard (`src/dashboard/`)
 Streamlit app que consume el API vía `APIClient` (httpx síncrono).
 
-Cuatro páginas: **Live Monitor** (WebSocket + waveform en tiempo real), **Event Feed** (grid con audio/frame reproducibles), **Similarity Search** (upload de query), **Offline Analysis** (IMFs de EMD + mel-spectrogram con Plotly).
+Cuatro páginas; todas exponen `render(client: APIClient) -> None`:
+- **Live Monitor** — scores en tiempo real vía WebSocket, historial de score/RMS con Plotly; botones "Reiniciar historial" y "Reiniciar detector"
+- **Event Feed** — grid con audio/frame reproducibles; botones "Eliminar evento" y "Borrar todo"
+- **Similarity Search** — upload de query (audio o imagen), resultados por similitud coseno
+- **Offline Analysis** — IMFs de EMD + mel-spectrogram con Plotly
+
+Todo el HTML dinámico usa `st.html()` (no `st.markdown(unsafe_allow_html=True)`) para garantizar renderizado correcto en contextos de columnas.
 
 ---
 
