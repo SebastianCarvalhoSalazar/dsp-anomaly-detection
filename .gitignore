@@ -1,0 +1,62 @@
+# Virtual environment
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# Environment variables — nunca commitear credenciales
+.env
+*.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code — configuración personal local
+.claude/settings.local.json
+
+# Data / eventos detectados
+eventos/
+data/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Modelos y pesos — pueden pesar varios GB
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.onnx
+models/
+checkpoints/
+
+# Caché de HuggingFace (si se descarga dentro del proyecto)
+.cache/
+huggingface/
+
+# Base de datos local del MVP
+*.db
+*.sqlite
+*.sqlite3
+
+# Índices FAISS
+*.index
+faiss_store/
+
+# folders
+doc/
+eventos/
