@@ -1,4 +1,6 @@
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -7,16 +9,25 @@ class DSPConfig:
 
     sample_rate: int = 16000
     # Powers-of-2 required by Kymatio's filter bank construction
-    window_size: int = 2048
+    window_size: int = 4096
     # 75% overlap between windows
-    hop_size: int = 512
+    hop_size: int = 1024
     # Daubechies-4: good time-frequency resolution for transient audio
     wavelet: str = "db4"
-    # level=5 yields 6 coefficient arrays (1 approximation + 5 detail)
-    wavelet_level: int = 5
-    # J=6 < log2(2048)=11; controls maximum scale of scattering transform
-    scattering_J: int = 6
+    # level=7 yields 8 coefficient arrays (1 approximation + 7 detail)
+    wavelet_level: int = 7
+    # J=8 < log2(4096)=12; covers down to ~62 Hz at 16 kHz sample rate
+    scattering_J: int = 8
     # Filters per octave: Q=8 balances frequency resolution vs computation
     scattering_Q: int = 8
-    # 126 scattering + 6 wavelet energies + 1 RMS + 1 ZCR
-    feature_dim: int = 134
+
+    # -- Spectral features (new) ------------------------------------------------
+    spectral_rolloff_percentile: float = 0.85
+
+    # -- Delta features (new) ---------------------------------------------------
+    # Enable first-order deltas for RMS, spectral centroid, scattering energy
+    enable_deltas: bool = True
+
+    # feature_dim is computed dynamically at AudioProcessor init; this field
+    # is overwritten after the scattering filter bank is built.
+    feature_dim: int = field(default=0, init=False)

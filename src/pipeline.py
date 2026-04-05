@@ -58,6 +58,13 @@ class Pipeline:
         self.dsp = AudioProcessor(DSPConfig())
         self.detector = AnomalyDetector(DetectorConfig())
         self.encoder = MultimodalEncoder()
+
+        # Persistent baseline (3.4): try to restore previous session
+        if self.detector.load_state():
+            logger.info(
+                "Loaded detector state from disk "
+                "(skipping warmup)"
+            )
         self.event_store = EventStore(config)
         self.faiss_store = FAISSStore(config)
         self.db = Database(config)
@@ -70,10 +77,15 @@ class Pipeline:
         self._frame_lock = threading.Lock()
         self._running = False
 
-        # Rolling buffer of raw audio samples: keeps the last 3 seconds before
-        # an anomaly so saved events are long enough to be meaningful for playback.
+        # Rolling buffer of raw audio samples: keeps the last 3 seconds
+        # before an anomaly so saved events are meaningful for playback.
         _sr = DSPConfig().sample_rate
-        self._pre_audio_buffer: deque[float] = deque(maxlen=3 * _sr)  # 48 000 samples @ 16 kHz
+        self._pre_audio_buffer: deque[float] = deque(
+            maxlen=3 * _sr
+        )  # 48 000 samples @ 16 kHz
+
+        # Cross-modal correlation state (3.2)
+        self._last_motion_energy: float = 0.0
 
     def run(self) -> None:
         """Start the pipeline. Blocks until KeyboardInterrupt."""
@@ -112,6 +124,14 @@ class Pipeline:
         finally:
             self._running = False
             self.frame_capture.close()
+            # Persistent baseline: save state for next run
+            try:
+                self.detector.save_state()
+                logger.info("Detector state saved.")
+            except Exception as exc:
+                logger.warning(
+                    "Failed to save detector state: %s", exc
+                )
 
     def _check_reset(self) -> None:
         """Poll the API for a pending detector reset request and apply it."""
@@ -149,6 +169,17 @@ class Pipeline:
                 frame = self._latest_frame.copy() if self._latest_frame is not None else None
 
             boxes = self.vision.detect(frame) if frame is not None else []
+
+            # Cross-modal correlation (3.2)
+            if boxes and frame is not None:
+                frame_area = float(
+                    frame.shape[0] * frame.shape[1]
+                )
+                self._last_motion_energy = (
+                    sum(b.area for b in boxes) / frame_area
+                )
+            else:
+                self._last_motion_energy *= 0.9  # decay
 
             # Notify API (non-blocking fire-and-forget)
             self._notify_api(result, boxes)
