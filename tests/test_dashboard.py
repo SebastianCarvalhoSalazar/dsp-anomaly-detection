@@ -104,6 +104,14 @@ def test_get_frame_url():
     assert client.get_frame_url(5) == "http://testserver/events/5/frame"
 
 
+def test_get_annotated_frame_url():
+    client = APIClient(base_url="http://testserver")
+    url = client.get_annotated_frame_url(5)
+    assert url == (
+        "http://testserver/events/5/frame/annotated"
+    )
+
+
 # ---------------------------------------------------------------------------
 # search_similar
 # ---------------------------------------------------------------------------
@@ -136,6 +144,35 @@ def test_search_similar_returns_empty_on_no_results():
         mock_post.return_value = _mock_response([])
         client = APIClient()
         result = client.search_similar(b"", "f.wav")
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# search_by_event
+# ---------------------------------------------------------------------------
+
+def test_search_by_event_calls_correct_url():
+    fake_results = [
+        {"event": FAKE_EVENTS[1], "cosine_similarity": 0.88}
+    ]
+    with patch("src.dashboard.api_client.httpx.get") as mock_get:
+        mock_get.return_value = _mock_response(fake_results)
+        client = APIClient(base_url="http://testserver")
+        result = client.search_by_event(event_id=1, k=3)
+
+    mock_get.assert_called_once()
+    call_args = mock_get.call_args
+    assert "by-event/1" in call_args[0][0]
+    assert call_args[1]["params"]["k"] == 3
+    assert len(result) == 1
+    assert result[0]["cosine_similarity"] == 0.88
+
+
+def test_search_by_event_returns_empty():
+    with patch("src.dashboard.api_client.httpx.get") as mock_get:
+        mock_get.return_value = _mock_response([])
+        client = APIClient()
+        result = client.search_by_event(event_id=99)
     assert result == []
 
 

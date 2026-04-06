@@ -83,6 +83,200 @@ def test_motion_detector_returns_bounding_box_type():
 
 
 # ---------------------------------------------------------------------------
+# MotionDetector — IoU and temporal weights
+# ---------------------------------------------------------------------------
+
+def test_iou_identical_boxes():
+    a = BoundingBox(x=0, y=0, w=100, h=100, area=10000)
+    b = BoundingBox(x=0, y=0, w=100, h=100, area=10000)
+    assert abs(MotionDetector._iou(a, b) - 1.0) < 1e-6
+
+
+def test_iou_no_overlap():
+    a = BoundingBox(x=0, y=0, w=50, h=50, area=2500)
+    b = BoundingBox(x=200, y=200, w=50, h=50, area=2500)
+    assert MotionDetector._iou(a, b) == 0.0
+
+
+def test_iou_partial_overlap():
+    a = BoundingBox(x=0, y=0, w=100, h=100, area=10000)
+    b = BoundingBox(x=50, y=50, w=100, h=100, area=10000)
+    iou = MotionDetector._iou(a, b)
+    assert 0.0 < iou < 1.0
+
+
+def test_temporal_weight_new_box():
+    """First frame: all boxes are new → weight=1.0."""
+    det = MotionDetector()
+    boxes = [
+        BoundingBox(
+            x=10, y=10, w=50, h=50, area=2500,
+        ),
+    ]
+    det.assign_temporal_weights(boxes)
+    assert boxes[0].source_score == 1.0
+
+
+def test_temporal_weight_persistent_box():
+    """Same box twice → second time weight=0.5."""
+    det = MotionDetector()
+    # Simulate prev_boxes with same location
+    det._prev_boxes = [
+        BoundingBox(
+            x=10, y=10, w=50, h=50, area=2500,
+        ),
+    ]
+    boxes = [
+        BoundingBox(
+            x=10, y=10, w=50, h=50, area=2500,
+        ),
+    ]
+    det.assign_temporal_weights(boxes)
+    assert boxes[0].source_score == 0.5
+
+
+def test_detect_assigns_source_score():
+    """detect() should set source_score on returned boxes."""
+    config = VisionConfig(min_contour_area=100)
+    det = MotionDetector(config)
+    _warmup(det)
+    boxes = det.detect(_frame_with_patch())
+    if boxes:
+        # First detection → new boxes → weight 1.0
+        assert boxes[0].source_score == 1.0
+
+
+def test_source_score_default_zero():
+    """BoundingBox created without source_score defaults to 0."""
+    b = BoundingBox(x=0, y=0, w=10, h=10, area=100)
+    assert b.source_score == 0.0
+
+
+# ---------------------------------------------------------------------------
+# MotionDetector — merge nearby boxes
+# ---------------------------------------------------------------------------
+
+def test_merge_overlapping_boxes():
+    """Two overlapping boxes should merge into one."""
+    a = BoundingBox(x=0, y=0, w=100, h=100, area=10000)
+    b = BoundingBox(x=80, y=80, w=100, h=100, area=10000)
+    merged = MotionDetector._merge_nearby_boxes([a, b], gap=0)
+    assert len(merged) == 1
+    m = merged[0]
+    assert m.x == 0 and m.y == 0
+    assert m.w == 180 and m.h == 180
+
+
+def test_merge_nearby_within_gap():
+    """Two boxes separated by less than gap should merge."""
+    a = BoundingBox(x=0, y=0, w=50, h=50, area=2500)
+    b = BoundingBox(x=70, y=0, w=50, h=50, area=2500)
+    # gap between edges = 20px, gap threshold = 30
+    merged = MotionDetector._merge_nearby_boxes(
+        [a, b], gap=30,
+    )
+    assert len(merged) == 1
+    m = merged[0]
+    assert m.x == 0 and m.w == 120
+
+
+def test_merge_far_apart_boxes_untouched():
+    """Two distant boxes should NOT merge."""
+    a = BoundingBox(x=0, y=0, w=50, h=50, area=2500)
+    b = BoundingBox(x=300, y=300, w=50, h=50, area=2500)
+    merged = MotionDetector._merge_nearby_boxes(
+        [a, b], gap=30,
+    )
+    assert len(merged) == 2
+
+
+def test_merge_three_into_one():
+    """Three boxes forming a chain should all merge."""
+    a = BoundingBox(x=0, y=0, w=50, h=50, area=2500)
+    b = BoundingBox(x=60, y=0, w=50, h=50, area=2500)
+    c = BoundingBox(x=120, y=0, w=50, h=50, area=2500)
+    merged = MotionDetector._merge_nearby_boxes(
+        [a, b, c], gap=15,
+    )
+    assert len(merged) == 1
+    m = merged[0]
+    assert m.x == 0 and m.w == 170
+
+
+def test_merge_empty_list():
+    merged = MotionDetector._merge_nearby_boxes([], gap=30)
+    assert merged == []
+
+
+def test_merge_single_box():
+    b = BoundingBox(x=10, y=10, w=50, h=50, area=2500)
+    merged = MotionDetector._merge_nearby_boxes(
+        [b], gap=30,
+    )
+    assert len(merged) == 1
+    assert merged[0].x == 10
+
+
+def test_edge_distance_overlapping():
+    a = BoundingBox(x=0, y=0, w=100, h=100, area=10000)
+    b = BoundingBox(x=50, y=50, w=100, h=100, area=10000)
+    assert MotionDetector._edge_distance(a, b) == 0.0
+
+
+def test_edge_distance_separated():
+    a = BoundingBox(x=0, y=0, w=50, h=50, area=2500)
+    b = BoundingBox(x=70, y=0, w=50, h=50, area=2500)
+    # gap in x = 20, gap in y = 0
+    assert MotionDetector._edge_distance(a, b) == 20.0
+
+
+def test_merge_disabled_with_negative_gap():
+    """gap < 0 should disable merging entirely."""
+    a = BoundingBox(x=0, y=0, w=100, h=100, area=10000)
+    b = BoundingBox(x=50, y=50, w=100, h=100, area=10000)
+    merged = MotionDetector._merge_nearby_boxes(
+        [a, b], gap=-1,
+    )
+    assert len(merged) == 2
+
+
+def test_merge_blocked_by_max_area():
+    """Overlapping boxes should NOT merge if result exceeds max_area."""
+    a = BoundingBox(x=0, y=0, w=200, h=200, area=40000)
+    b = BoundingBox(x=100, y=100, w=200, h=200, area=40000)
+    # Union would be 300×300 = 90000 > max_area=50000
+    merged = MotionDetector._merge_nearby_boxes(
+        [a, b], gap=0, max_area=50000,
+    )
+    assert len(merged) == 2
+
+
+def test_merge_allowed_under_max_area():
+    """Small overlapping boxes should merge when under max_area."""
+    a = BoundingBox(x=0, y=0, w=50, h=50, area=2500)
+    b = BoundingBox(x=40, y=0, w=50, h=50, area=2500)
+    # Union = 90×50 = 4500 < max_area=10000
+    merged = MotionDetector._merge_nearby_boxes(
+        [a, b], gap=0, max_area=10000,
+    )
+    assert len(merged) == 1
+
+
+def test_merge_chain_blocked_by_max_area():
+    """Chain of 3 overlapping boxes: first pair merges,
+    but merging with the third exceeds max_area."""
+    a = BoundingBox(x=0, y=0, w=80, h=80, area=6400)
+    b = BoundingBox(x=70, y=0, w=80, h=80, area=6400)
+    c = BoundingBox(x=140, y=0, w=80, h=80, area=6400)
+    # a+b union = 150×80 = 12000 (ok if max_area=15000)
+    # (a+b)+c union = 220×80 = 17600 (exceeds 15000)
+    merged = MotionDetector._merge_nearby_boxes(
+        [a, b, c], gap=0, max_area=15000,
+    )
+    assert len(merged) == 2
+
+
+# ---------------------------------------------------------------------------
 # MotionDetector — draw_boxes
 # ---------------------------------------------------------------------------
 
@@ -126,9 +320,14 @@ def test_reset_reinitializes_background():
     config = VisionConfig(min_contour_area=100)
     det = MotionDetector(config)
     _warmup(det, n=20)
-    # After reset, a previously stable frame may trigger motion again
+    det._prev_boxes = [
+        BoundingBox(
+            x=0, y=0, w=10, h=10, area=100,
+        ),
+    ]
     det.reset()
-    # Just verify reset does not raise and detector remains usable
+    assert det._prev_boxes == []
+    # Verify detector remains usable
     boxes = det.detect(_black_frame())
     assert isinstance(boxes, list)
 

@@ -137,7 +137,10 @@ def render(client: APIClient) -> None:
                          letter-spacing:0.08em;text-transform:uppercase;
                          color:{PALETTE['muted']};margin-bottom:4px;">Frame capturado</div>
                     """)
-                    st.image(client.get_frame_url(eid), use_container_width=True)
+                    st.image(
+                        client.get_annotated_frame_url(eid),
+                        use_container_width=True,
+                    )
                 else:
                     st.html("""
                     <div class="empty-state" style="padding:1.5rem 0;">

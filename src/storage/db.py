@@ -77,6 +77,25 @@ class Database:
                 session.expunge(event)
             return event
 
+    def get_event_by_faiss_id(self, faiss_id: int) -> Optional[AnomalyEvent]:
+        """Fetch a single event by its FAISS index ID.
+
+        This is used by the similarity search endpoint to resolve FAISS
+        result IDs back to event metadata in O(1) per result, avoiding
+        the previous O(N) full-table scan.
+
+        Returns None if no event has the given ``faiss_index_id``.
+        """
+        with self._Session() as session:
+            event = (
+                session.query(AnomalyEvent)
+                .filter(AnomalyEvent.faiss_index_id == faiss_id)
+                .first()
+            )
+            if event is not None:
+                session.expunge(event)
+            return event
+
     def delete_event(self, event_id: int) -> bool:
         """Delete a single event row by primary key. Returns True if it existed."""
         with self._Session() as session:

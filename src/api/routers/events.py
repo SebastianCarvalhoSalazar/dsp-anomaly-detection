@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import os
-from datetime import datetime
+import json
 from pathlib import Path
-from typing import Optional
 
 import anyio
+import cv2
 import librosa
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from PyEMD import EMD
 
 from src.api.dependencies import get_db, get_event_store, get_faiss_store
@@ -87,6 +86,103 @@ async def get_frame(
     if not frame_path.exists():
         raise HTTPException(status_code=404, detail="Frame not found")
     return FileResponse(str(frame_path), media_type="image/jpeg")
+
+
+@router.get("/{event_id}/frame/annotated")
+async def get_annotated_frame(
+    event_id: int,
+    db: Database = Depends(get_db),
+) -> Response:
+    """Return the event frame with bounding boxes drawn on it.
+
+    Loads the stored JPEG frame and the motion bounding boxes from
+    ``source_region_json``.  Each box is drawn as a coloured
+    rectangle with a small label showing its area percentage.
+    If no boxes are stored the plain frame is returned.
+    """
+    event = await anyio.to_thread.run_sync(
+        lambda: db.get_event(event_id)
+    )
+    if event is None:
+        raise HTTPException(
+            status_code=404, detail="Event not found"
+        )
+    frame_path = Path(event.event_dir) / "frame.jpg"
+    if not frame_path.exists():
+        raise HTTPException(
+            status_code=404, detail="Frame not found"
+        )
+
+    def _annotate() -> bytes:
+        frame = cv2.imread(str(frame_path))
+        if frame is None:
+            with open(str(frame_path), "rb") as f:
+                return f.read()
+
+        boxes: list[dict] = []
+        if event.source_region_json:
+            try:
+                boxes = json.loads(event.source_region_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        if not boxes:
+            with open(str(frame_path), "rb") as f:
+                return f.read()
+
+        h, w = frame.shape[:2]
+
+        # Pick the single best box (highest source_score)
+        best = max(
+            boxes,
+            key=lambda b: b.get("source_score", 0),
+        )
+        bx, by = int(best["x"]), int(best["y"])
+        bw, bh = int(best["w"]), int(best["h"])
+        ss = best.get("source_score", 0)
+
+        colour = (60, 60, 230)  # red BGR
+        cv2.rectangle(
+            frame,
+            (bx, by),
+            (bx + bw, by + bh),
+            colour,
+            2,
+        )
+
+        label = f"source {ss:.3f}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        (tw, th), _ = cv2.getTextSize(
+            label, font, 0.5, 1,
+        )
+        cv2.rectangle(
+            frame,
+            (bx, by - th - 6),
+            (bx + tw + 4, by),
+            colour,
+            -1,
+        )
+        cv2.putText(
+            frame,
+            label,
+            (bx + 2, by - 4),
+            font,
+            0.5,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+
+        _, buf = cv2.imencode(
+            ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90]
+        )
+        return buf.tobytes()
+
+    img_bytes = await anyio.to_thread.run_sync(_annotate)
+    return Response(
+        content=img_bytes,
+        media_type="image/jpeg",
+    )
 
 
 @router.delete("/{event_id}", status_code=204)

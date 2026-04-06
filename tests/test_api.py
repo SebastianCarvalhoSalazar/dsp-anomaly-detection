@@ -160,6 +160,115 @@ def test_get_frame_not_found_when_no_frame(client, tmp_stores, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# GET /events/{id}/frame/annotated
+# ---------------------------------------------------------------------------
+
+def test_annotated_frame_not_found_event(client):
+    resp = client.get("/events/9999/frame/annotated")
+    assert resp.status_code == 404
+
+
+def test_annotated_frame_no_frame_file(
+    client, tmp_stores, tmp_path,
+):
+    db, faiss_store, event_store = tmp_stores
+    app = create_app(
+        db=db, faiss_store=faiss_store,
+        event_store=event_store,
+    )
+    with TestClient(app) as c:
+        eid = _insert_event(db, event_store, tmp_path)
+        resp = c.get(f"/events/{eid}/frame/annotated")
+        assert resp.status_code == 404
+
+
+def _insert_event_with_frame(
+    db, event_store, tmp_path, boxes=None, score=0.7,
+):
+    """Persist a dummy event with a real JPEG frame."""
+    global _event_counter
+    _event_counter += 1
+    ts = datetime(
+        2024, 6, 1, 12, 0, _event_counter,
+        tzinfo=timezone.utc,
+    )
+    # Create a small synthetic frame
+    frame = np.zeros((120, 160, 3), dtype=np.uint8)
+    frame[:] = (80, 80, 80)
+    audio = np.zeros(1024, dtype=np.float32)
+    event_dir = event_store.save_event(
+        ts, audio, 16000, frame=frame,
+        anomaly_score=score,
+    )
+    src_region = (
+        json.dumps(boxes)
+        if boxes is not None
+        else None
+    )
+    orm_event = AnomalyEvent(
+        timestamp=ts,
+        anomaly_score=score,
+        event_dir=str(event_dir),
+        source_region_json=src_region,
+    )
+    return db.save_event(orm_event)
+
+
+def test_annotated_frame_no_boxes(
+    client, tmp_stores, tmp_path,
+):
+    """Frame without boxes should return plain JPEG."""
+    db, faiss_store, event_store = tmp_stores
+    app = create_app(
+        db=db, faiss_store=faiss_store,
+        event_store=event_store,
+    )
+    with TestClient(app) as c:
+        eid = _insert_event_with_frame(
+            db, event_store, tmp_path,
+        )
+        resp = c.get(f"/events/{eid}/frame/annotated")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == (
+            "image/jpeg"
+        )
+        assert len(resp.content) > 100
+
+
+def test_annotated_frame_with_boxes(
+    client, tmp_stores, tmp_path,
+):
+    """Frame with boxes should return annotated JPEG."""
+    db, faiss_store, event_store = tmp_stores
+    boxes = [
+        {
+            "x": 10, "y": 10, "w": 40, "h": 30,
+            "source_score": 0.42,
+        },
+        {
+            "x": 80, "y": 50, "w": 30, "h": 20,
+            "source_score": 0.18,
+        },
+    ]
+    app = create_app(
+        db=db, faiss_store=faiss_store,
+        event_store=event_store,
+    )
+    with TestClient(app) as c:
+        eid = _insert_event_with_frame(
+            db, event_store, tmp_path, boxes=boxes,
+        )
+        resp = c.get(f"/events/{eid}/frame/annotated")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == (
+            "image/jpeg"
+        )
+        # Annotated image should differ from raw
+        raw = c.get(f"/events/{eid}/frame")
+        assert len(resp.content) != len(raw.content)
+
+
+# ---------------------------------------------------------------------------
 # WebSocket /ws/stream
 # ---------------------------------------------------------------------------
 
@@ -187,6 +296,7 @@ def test_websocket_broadcast(client, tmp_stores, tmp_path):
                 "timestamp": "2024-01-01T00:00:00",
                 "window_index": 1,
                 "bounding_boxes": [],
+                "motion_energy": 0.15,
             }
             resp = c.post("/internal/score", json=payload)
             assert resp.status_code == 200
@@ -194,6 +304,7 @@ def test_websocket_broadcast(client, tmp_stores, tmp_path):
             data = json.loads(msg)
             assert abs(data["anomaly_score"] - 0.9) < 1e-6
             assert data["is_anomaly"] is True
+            assert abs(data["motion_energy"] - 0.15) < 1e-6
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +472,84 @@ def test_search_similar_rejects_oversized_file(client):
         files={"file": ("big.wav", oversized, "audio/wav")},
     )
     assert resp.status_code == 413
+
+
+# ---------------------------------------------------------------------------
+# GET /search/similar/by-event/{event_id}
+# ---------------------------------------------------------------------------
+
+def _insert_event_with_embedding(
+    db, faiss_store, event_store, tmp_path, score=0.7
+):
+    """Persist a dummy event with an embedding so search-by-event works."""
+    global _event_counter
+    _event_counter += 1
+    ts = datetime(
+        2024, 6, 1, 12, 0, _event_counter, tzinfo=timezone.utc
+    )
+    audio = np.zeros(1024, dtype=np.float32)
+    event_dir = event_store.save_event(
+        ts, audio, 16000, frame=None, anomaly_score=score
+    )
+    rng = np.random.default_rng(_event_counter)
+    emb = rng.standard_normal(1536).astype(np.float32)
+    emb = emb / np.linalg.norm(emb)
+    event_store.save_embedding(event_dir, emb)
+    faiss_id = faiss_store.add(emb)
+    orm_event = AnomalyEvent(
+        timestamp=ts,
+        anomaly_score=score,
+        event_dir=str(event_dir),
+        faiss_index_id=faiss_id,
+        embedding_path=str(event_dir / "embedding.npy"),
+    )
+    return db.save_event(orm_event)
+
+
+def test_search_by_event_returns_similar(tmp_stores, tmp_path):
+    db, faiss_store, event_store = tmp_stores
+    app = create_app(
+        db=db, faiss_store=faiss_store, event_store=event_store
+    )
+    with TestClient(app) as c:
+        # Insert 3 events so there's something to find
+        ids = [
+            _insert_event_with_embedding(
+                db, faiss_store, event_store, tmp_path,
+                score=0.5 + 0.1 * i,
+            )
+            for i in range(3)
+        ]
+        resp = c.get(
+            f"/search/similar/by-event/{ids[0]}?k=2"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        # Should return up to 2 results, excluding the source
+        assert isinstance(data, list)
+        assert len(data) <= 2
+        returned_ids = [
+            r["event"]["id"] for r in data
+        ]
+        assert ids[0] not in returned_ids
+
+
+def test_search_by_event_not_found(client):
+    resp = client.get("/search/similar/by-event/99999?k=5")
+    assert resp.status_code == 404
+
+
+def test_search_by_event_no_embedding(tmp_stores, tmp_path):
+    """Event without embedding_path returns 404."""
+    db, faiss_store, event_store = tmp_stores
+    app = create_app(
+        db=db, faiss_store=faiss_store, event_store=event_store
+    )
+    with TestClient(app) as c:
+        # Insert event without embedding
+        eid = _insert_event(db, event_store, tmp_path)
+        resp = c.get(f"/search/similar/by-event/{eid}?k=5")
+        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------

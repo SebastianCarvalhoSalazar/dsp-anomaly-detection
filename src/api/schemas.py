@@ -31,6 +31,7 @@ class AnomalyScoreMessage(BaseModel):
     timestamp: str        # ISO format
     window_index: int
     bounding_boxes: list[dict]
+    motion_energy: float = 0.0  # normalised motion area ratio [0,1]
 
 
 class OfflineAnalysisResponse(BaseModel):

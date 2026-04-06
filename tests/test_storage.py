@@ -155,6 +155,28 @@ def test_db_update_faiss_id(db):
     assert loaded.faiss_index_id == 42
 
 
+def test_db_get_event_by_faiss_id(db):
+    """get_event_by_faiss_id returns the correct event."""
+    event = _make_orm_event(event_dir="eventos/faiss_lookup")
+    event_id = db.save_event(event)
+    db.update_faiss_id(event_id, 77)
+    found = db.get_event_by_faiss_id(77)
+    assert found is not None
+    assert found.id == event_id
+    assert found.faiss_index_id == 77
+
+
+def test_db_get_event_by_faiss_id_not_found(db):
+    """Returns None when no event has the given faiss_index_id."""
+    assert db.get_event_by_faiss_id(9999) is None
+
+
+def test_db_get_event_by_faiss_id_none_id(db):
+    """Events without a faiss_index_id are not returned."""
+    db.save_event(_make_orm_event(event_dir="eventos/no_fid"))
+    assert db.get_event_by_faiss_id(0) is None
+
+
 def test_db_list_events_ordered_desc(db):
     from datetime import timedelta
     base = datetime(2024, 1, 1, tzinfo=timezone.utc)

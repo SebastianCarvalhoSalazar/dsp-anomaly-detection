@@ -18,3 +18,10 @@ class VisionConfig:
     # Morphological kernel size for noise removal and region merging
     morph_kernel_size: int = 5
     dilation_iterations: int = 2
+    # Max gap (px) between box edges to merge them into one.
+    # 0 = only overlapping/touching boxes merge.
+    # -1 = disable merging entirely.
+    merge_gap: int = 0
+    # Max fraction of frame area a merged box may occupy.
+    # Prevents chain-merging from creating frame-sized boxes.
+    max_box_ratio: float = 0.4

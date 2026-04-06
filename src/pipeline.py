@@ -88,9 +88,21 @@ class Pipeline:
         self._last_motion_energy: float = 0.0
 
     def run(self) -> None:
-        """Start the pipeline. Blocks until KeyboardInterrupt."""
+        """Start the pipeline. Blocks until KeyboardInterrupt.
+
+        Embedding models (Wav2Vec2 + DINOv2) are preloaded in a background
+        thread so they are ready before the first anomaly is detected,
+        without blocking the audio processing hot-path.
+        """
         self.db.init()
         self.faiss_store.init()
+
+        # Pre-download / warm-up embedding models in the background so the
+        # first anomaly event does not incur a ~60 s model-load penalty.
+        threading.Thread(
+            target=self.encoder.ensure_downloaded, daemon=True
+        ).start()
+        logger.info("Background model preload started.")
 
         # Open camera in a background thread
         camera_thread = threading.Thread(target=self._camera_loop, daemon=True)
@@ -178,6 +190,20 @@ class Pipeline:
                 self._last_motion_energy = (
                     sum(b.area for b in boxes) / frame_area
                 )
+                # Source-score ranking (Option B):
+                # score = anomaly_score × area_ratio × temporal_weight
+                for b in boxes:
+                    area_ratio = b.area / frame_area
+                    b.source_score = (
+                        result.anomaly_score
+                        * area_ratio
+                        * b.source_score  # temporal weight
+                    )
+                boxes.sort(
+                    key=lambda b: b.source_score,
+                    reverse=True,
+                )
+                boxes = boxes[:1]  # best match only
             else:
                 self._last_motion_energy *= 0.9  # decay
 
@@ -187,7 +213,10 @@ class Pipeline:
             if result.is_anomaly:
                 # Snapshot the pre-event buffer (last 3s) as the event audio
                 audio_clip = np.array(list(self._pre_audio_buffer), dtype=np.float32)
-                self._handle_anomaly(result, audio_clip, frame, boxes)
+                self._handle_anomaly(
+                    result, audio_clip, frame, boxes,
+                    motion_energy=self._last_motion_energy,
+                )
 
     def _handle_anomaly(
         self,
@@ -195,8 +224,18 @@ class Pipeline:
         audio_window: np.ndarray,
         frame: Optional[np.ndarray],
         boxes,
+        *,
+        motion_energy: float = 0.0,
     ) -> None:
-        """Persist an anomaly event: filesystem → FAISS → SQLite."""
+        """Persist an anomaly event: filesystem → FAISS → SQLite.
+
+        Parameters
+        ----------
+        motion_energy : float
+            Normalised ratio (0–1) of total bounding-box area to frame area
+            at the moment the anomaly was confirmed.  Stored in the event
+            metadata for later cross-modal analysis.
+        """
         ts = datetime.fromtimestamp(result.timestamp, tz=timezone.utc)
         event_dir = self.event_store.save_event(
             timestamp=ts,
@@ -207,8 +246,16 @@ class Pipeline:
             extra_metadata={
                 "window_index": result.window_index,
                 "raw_score": result.raw_score,
+                "motion_energy": motion_energy,
                 "bounding_boxes": [
-                    {"x": b.x, "y": b.y, "w": b.w, "h": b.h} for b in boxes
+                    {
+                        "x": b.x, "y": b.y,
+                        "w": b.w, "h": b.h,
+                        "source_score": round(
+                            b.source_score, 4,
+                        ),
+                    }
+                    for b in boxes
                 ],
             },
         )
@@ -225,9 +272,16 @@ class Pipeline:
             audio_path=str(event_dir / "audio.wav"),
             frame_path=str(event_dir / "frame.jpg") if frame is not None else None,
             embedding_path=str(event_dir / "embedding.npy"),
-            source_region_json=json.dumps(
-                [{"x": b.x, "y": b.y, "w": b.w, "h": b.h} for b in boxes]
-            ),
+            source_region_json=json.dumps([
+                {
+                    "x": b.x, "y": b.y,
+                    "w": b.w, "h": b.h,
+                    "source_score": round(
+                        b.source_score, 4,
+                    ),
+                }
+                for b in boxes
+            ]),
         )
         self.db.save_event(orm_event)
         logger.info("Anomaly event saved: %s (score=%.3f)", event_dir, result.anomaly_score)
@@ -246,7 +300,11 @@ class Pipeline:
             logger.warning("Camera unavailable: %s", exc)
 
     def _notify_api(self, result, boxes) -> None:
-        """POST anomaly score to API for WebSocket broadcast (fire-and-forget)."""
+        """POST anomaly score to API for WebSocket broadcast (fire-and-forget).
+
+        The payload includes ``motion_energy`` so the dashboard can
+        correlate visual activity with the anomaly score in real time.
+        """
         try:
             payload = {
                 "anomaly_score": result.anomaly_score,
@@ -257,8 +315,16 @@ class Pipeline:
                 ).isoformat(),
                 "window_index": result.window_index,
                 "bounding_boxes": [
-                    {"x": b.x, "y": b.y, "w": b.w, "h": b.h} for b in boxes
+                    {
+                        "x": b.x, "y": b.y,
+                        "w": b.w, "h": b.h,
+                        "source_score": round(
+                            b.source_score, 4,
+                        ),
+                    }
+                    for b in boxes
                 ],
+                "motion_energy": self._last_motion_energy,
             }
             httpx.post(API_INTERNAL_URL, json=payload, timeout=0.5)
         except Exception:

@@ -44,9 +44,9 @@ EOF
 
 ---
 
-## Paso 4 — Descargar modelos de HuggingFace
+## Paso 4 — Descargar modelos de HuggingFace (opcional)
 
-Solo hay que hacerlo una vez. Los modelos quedan en el cache local y todas las ejecuciones posteriores son completamente offline.
+Los modelos se descargan automáticamente al iniciar el pipeline o la API (en background threads). Si prefieres descargarlos manualmente por adelantado:
 
 ```bash
 poetry run python - << 'EOF'
@@ -98,9 +98,11 @@ Abre una **tercera terminal**:
 poetry run python -m src.pipeline
 ```
 
-**Fase de calentamiento (~25 segundos):** el detector acumula 200 ventanas de audio para entrenar el Isolation Forest. Durante este período no se detectan anomalías.
+**Fase de calentamiento (~2 minutos / 500 ventanas):** el detector acumula ventanas de audio para entrenar el Isolation Forest. Si existe un estado guardado de una sesión anterior (`data/detector_state.pkl`), el warmup se salta completamente.
 
-**Después del calentamiento:** el detector puntúa cada ventana en tiempo real. Si el score supera el umbral, se guarda un evento completo (audio, frame, embedding) y el dashboard se actualiza.
+**Preloading de modelos:** al iniciar el pipeline, los modelos Wav2Vec2 y DINOv2 se descargan/cargan en un background thread en paralelo con el warmup, para que la primera anomalía se procese sin delay adicional.
+
+**Después del calentamiento:** el detector puntúa cada ventana en tiempo real. Si el score supera el umbral (con hysteresis de 3 ventanas consecutivas), se guarda un evento completo (audio, frame, embedding, motion_energy) y el dashboard se actualiza.
 
 Para detener el pipeline: `Ctrl+C`
 
@@ -123,17 +125,22 @@ Una vez el pipeline está corriendo, abre `http://localhost:8501` y explora las 
 **Live Monitor**
 - Habla o haz ruido cerca del micrófono — verás el anomaly score subir en tiempo real
 - El historial de scores y amplitud RMS se actualiza cada segundo
+- **Motion energy**: indicador que muestra el nivel de actividad visual detectada por la cámara
+- **Fuente probable**: chip rojo que muestra las coordenadas y `source_score` de la caja que más correlaciona con la anomalía acústica
 - **Reiniciar historial**: limpia los gráficos de la sesión (no afecta el detector)
-- **Reiniciar detector**: envía señal al pipeline para reiniciar el Isolation Forest desde cero (reinicia el warmup de ~25s)
+- **Reiniciar detector**: envía señal al pipeline para reiniciar el Isolation Forest desde cero (reinicia el warmup)
 
 **Event Feed**
-- Lista de anomalías detectadas con audio reproducible y frame de video (si hay cámara)
+- Lista de anomalías detectadas con audio reproducible y frame de video anotado (bounding box de la fuente dibujado en rojo)
 - Filtra por score mínimo con el slider
 - **Eliminar evento**: borra un evento individual (DB + archivos en disco)
 - **Borrar todo**: elimina todos los eventos y resetea el índice FAISS
 
 **Similarity Search**
-- Sube un archivo WAV o imagen y busca los eventos más similares en el índice
+- Dos modos de búsqueda:
+  - 📁 **Subir archivo**: sube un WAV o imagen y busca los eventos más similares (la primera búsqueda puede tardar ~60s por carga de modelos; las siguientes son instantáneas gracias al preloading)
+  - 📋 **Evento existente**: selecciona un evento del desplegable y busca similares usando su embedding pre-computado → **respuesta instantánea** sin necesidad de cargar modelos
+- Resultados con frames anotados (bounding box de fuente) y score de similitud
 - Requiere al menos un evento guardado en el índice FAISS
 - Límite de 10 MB por archivo subido
 
@@ -155,7 +162,7 @@ Para verificar que todo el código funciona correctamente sin necesidad de hardw
 
 ```bash
 poetry run pytest -v
-# 145+ tests, ~4 segundos
+# 183 tests, ~3 segundos
 ```
 
 ### Smoke test del pipeline DSP sin micrófono

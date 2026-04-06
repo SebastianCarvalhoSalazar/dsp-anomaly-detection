@@ -44,6 +44,10 @@ class APIClient:
         """Return the URL to stream the frame image for an event."""
         return f"{self._base_url}/events/{event_id}/frame"
 
+    def get_annotated_frame_url(self, event_id: int) -> str:
+        """Return the URL for the frame with bounding boxes drawn."""
+        return f"{self._base_url}/events/{event_id}/frame/annotated"
+
     def search_similar(
         self,
         file_bytes: bytes,
@@ -58,6 +62,24 @@ class APIClient:
             params={"modality": modality, "k": k},
             files={"file": (filename, file_bytes, content_type)},
             timeout=120.0,  # first call loads Wav2Vec2+DINOv2 (~60s); subsequent calls are fast
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def search_by_event(
+        self,
+        event_id: int,
+        k: int = 5,
+    ) -> list[dict]:
+        """Find events similar to an already-stored event.
+
+        Uses the pre-computed embedding on the server, so no model
+        loading is needed and the response is near-instant.
+        """
+        resp = httpx.get(
+            f"{self._base_url}/search/similar/by-event/{event_id}",
+            params={"k": k},
+            timeout=30.0,
         )
         resp.raise_for_status()
         return resp.json()

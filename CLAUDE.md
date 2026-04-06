@@ -31,13 +31,17 @@ Proceso principal síncrono. Orquesta todos los módulos de procesamiento.
 
 **Flujo interno por ventana de audio:**
 1. `sounddevice` callback → cola de audio (maxsize=64)
-2. `AudioProcessor.process_window()` → vector de 134 features (126 scattering Kymatio + 6 wavelet db4 energías + RMS + ZCR)
-3. `AnomalyDetector.score()` → `AnomalyResult` con score normalizado [0,1]
-4. `MotionDetector.detect()` sobre el frame más reciente (thread separado para cámara)
-5. HTTP POST a `/internal/score` (fire-and-forget, notifica al API para broadcast WebSocket)
-6. Si `is_anomaly=True` → `_handle_anomaly()`: guarda evento en filesystem + genera embeddings multimodales + indexa en FAISS + persiste en SQLite
+2. `AudioProcessor.process_window()` → vector de features dinámico (scattering Kymatio + wavelet db4 energías + temporal RMS/ZCR + spectral centroid/flatness/rolloff/bandwidth + delta features)
+3. `AnomalyDetector.score()` → `AnomalyResult` con Z-score normalizado, EMA-smoothed, con hysteresis
+4. `MotionDetector.detect()` sobre el frame más reciente (thread separado para cámara) → merge de cajas cercanas (`merge_gap`, `max_box_ratio`), IoU tracking contra frame previo y asignación de temporal weights (nuevo=1.0, persistente=0.5)
+5. **Source scoring:** para cada box, calcula `source_score = anomaly_score × area_ratio × temporal_weight` y conserva solo el **top-1** (la caja más probable de ser la fuente de la anomalía acústica)
+6. Cross-modal: calcula `motion_energy` (ratio de bounding-box area / frame area)
+7. HTTP POST a `/internal/score` con `motion_energy` incluido (fire-and-forget, notifica al API para broadcast WebSocket)
+8. Si `is_anomaly=True` → `_handle_anomaly()`: guarda evento con `motion_energy` y `source_score` en metadata → genera embeddings multimodales → indexa en FAISS → persiste en SQLite
 
-**Detector online:** `AnomalyDetector` usa Isolation Forest con buffer deslizante de 200 ventanas (~25s). Se re-entrena cada 100 ventanas nuevas. Durante warmup devuelve `is_fitted=False`.
+**Model preloading:** Al inicio de `run()`, los modelos Wav2Vec2+DINOv2 se precargan en un background thread paralelo al warmup, eliminando la penalización de ~60s en la primera anomalía.
+
+**Detector online:** `AnomalyDetector` usa Isolation Forest con buffer deslizante de 500 ventanas. Se re-entrena cada 200 ventanas nuevas. Features son Z-score normalizados (Welford online). Scores pasan por EMA smoothing (α=0.3) y requieren 3 ventanas consecutivas de anomalía (hysteresis) para confirmar. Umbral adaptativo con percentil 2.0 sobre ventana de 500 scores.
 
 ### 2. API (`src/api/`)
 FastAPI async. Expone datos almacenados y recibe notificaciones del pipeline.
@@ -47,11 +51,15 @@ FastAPI async. Expone datos almacenados y recibe notificaciones del pipeline.
 - `GET /internal/reset-pending` — pipeline pollea este endpoint; retorna `{"pending": bool}` y limpia el flag (one-shot)
 - `GET /events/` — lista eventos con filtros (min_score, fecha, paginación)
 - `GET /events/{id}/audio|frame` — stream de archivos desde filesystem
+- `GET /events/{id}/frame/annotated` — devuelve el frame JPEG con el bounding box de la fuente más probable dibujado (rectángulo rojo + label `source X.XXX`)
 - `GET /events/{id}/offline_analysis` — corre EMD (PyEMD) + mel-spectrogram (librosa) sobre el audio del evento
 - `DELETE /events/{id}` — elimina DB row + filesystem; la entrada FAISS queda huérfana (ya es filtrada en búsqueda)
 - `DELETE /events/` — elimina todos los eventos y llama `FAISSStore.clear()`
-- `POST /search/similar` — recibe audio o imagen (máx. 10 MB), genera embedding con `MultimodalEncoder`, busca k vecinos en FAISS, retorna metadata desde SQLite
-- `WS /ws/stream` — WebSocket para el dashboard en tiempo real
+- `POST /search/similar` — recibe audio o imagen (máx. 10 MB), genera embedding con `MultimodalEncoder`, busca k vecinos en FAISS, retorna metadata desde SQLite. Usa `db.get_event_by_faiss_id()` para lookups O(1).
+- `GET /search/similar/by-event/{event_id}` — busca eventos similares a uno ya almacenado usando su embedding pre-computado. No requiere carga de modelos → respuesta instantánea. Excluye el evento fuente de los resultados.
+- `WS /ws/stream` — WebSocket para el dashboard en tiempo real (incluye `motion_energy` y `source_score` en cada mensaje)
+
+**Model preloading:** El lifespan handler lanza un background thread que pre-carga los modelos de embedding (Wav2Vec2+DINOv2) vía `_get_encoder()` con double-checked locking thread-safe. La primera búsqueda por upload no sufre cold-start de ~60s.
 
 Instancias de `Database`, `FAISSStore` y `EventStore` se inyectan vía `request.app.state` (dependency injection en `dependencies.py`). El startup usa `lifespan` context manager (FastAPI 0.93+).
 
@@ -59,9 +67,9 @@ Instancias de `Database`, `FAISSStore` y `EventStore` se inyectan vía `request.
 Streamlit app que consume el API vía `APIClient` (httpx síncrono).
 
 Cuatro páginas; todas exponen `render(client: APIClient) -> None`:
-- **Live Monitor** — scores en tiempo real vía WebSocket, historial de score/RMS con Plotly; botones "Reiniciar historial" y "Reiniciar detector"
-- **Event Feed** — grid con audio/frame reproducibles; botones "Eliminar evento" y "Borrar todo"
-- **Similarity Search** — upload de query (audio o imagen), resultados por similitud coseno
+- **Live Monitor** — scores en tiempo real vía WebSocket, historial de score/RMS con Plotly, indicador de motion_energy, chip **"Fuente probable"** con coordenadas y source_score de la caja top-1; botones "Reiniciar historial" y "Reiniciar detector"
+- **Event Feed** — grid con audio y frame anotado (bounding box de fuente dibujado); botones "Eliminar evento" y "Borrar todo"
+- **Similarity Search** — dos modos: (1) upload de query (audio o imagen) con encoding on-the-fly, (2) selección de evento existente que usa el embedding pre-computado (instantáneo). Resultados por similitud coseno. Frames mostrados con bounding box anotado.
 - **Offline Analysis** — IMFs de EMD + mel-spectrogram con Plotly
 
 Todo el HTML dinámico usa `st.html()` (no `st.markdown(unsafe_allow_html=True)`) para garantizar renderizado correcto en contextos de columnas.
@@ -72,10 +80,10 @@ Todo el HTML dinámico usa `st.html()` (no `st.markdown(unsafe_allow_html=True)`
 
 | Módulo | Clase principal | Output |
 |--------|----------------|--------|
-| `src/dsp/` | `AudioProcessor` | `FeatureVector` (134-dim np.float32) |
+| `src/dsp/` | `AudioProcessor` | `FeatureVector` (dynamic-dim np.float32) |
 | `src/detection/` | `AnomalyDetector` | `AnomalyResult` (score, is_anomaly, is_fitted) |
 | `src/embeddings/` | `MultimodalEncoder` | np.ndarray 1536-dim L2-normalizado |
-| `src/vision/` | `MotionDetector`, `FrameCapture` | `MotionResult` (boxes, annotated_frame) |
+| `src/vision/` | `MotionDetector`, `FrameCapture` | `MotionResult` (boxes con `source_score`, annotated_frame) |
 | `src/storage/` | `EventStore`, `Database`, `FAISSStore` | Persistencia híbrida filesystem+SQLite+FAISS |
 
 **Embeddings:** `AudioEncoder` (Wav2Vec2, 768-dim) + `ImageEncoder` (DINOv2, 768-dim) → concatenados y L2-normalizados → 1536-dim. Carga lazy con offline-first: intenta `local_files_only=True`, si falla descarga una sola vez.
@@ -83,6 +91,18 @@ Todo el HTML dinámico usa `st.html()` (no `st.markdown(unsafe_allow_html=True)`
 **FAISS:** `IndexFlatIP` (inner product = cosine sobre vectores L2-normalizados). IDs secuenciales ligados a `AnomalyEvent.faiss_index_id` en SQLite.
 
 **Persistencia de eventos:** `eventos/<timestamp>/audio.wav`, `frame.jpg`, `embedding.npy`, `metadata.json`.
+
+---
+
+## Source correlation — Correlación fuente-audio
+
+El sistema identifica cuál bounding box de movimiento es más probable que sea la fuente de la anomalía acústica usando un ranking multi-señal:
+
+1. **Detección de movimiento:** MOG2 → morfología → contornos → merge de cajas cercanas (solo si overlap/touching, limitado a ≤40% del frame)
+2. **Temporal weights (IoU tracking):** cada box se compara con las del frame anterior vía Intersection-over-Union. Cajas nuevas (IoU<0.3) reciben peso=1.0; cajas persistentes (IoU≥0.3) reciben peso=0.5. Esto prioriza objetos que acaban de aparecer.
+3. **Source score:** `source_score = anomaly_score × area_ratio × temporal_weight`, donde `area_ratio = box.area / frame_area`.
+4. **Top-1 filtering:** se conserva únicamente la caja con mayor `source_score`.
+5. **Visualización:** endpoint `GET /events/{id}/frame/annotated` dibuja la caja top-1 en rojo con label. Live Monitor muestra chip "Fuente probable" con coordenadas y score.
 
 ---
 

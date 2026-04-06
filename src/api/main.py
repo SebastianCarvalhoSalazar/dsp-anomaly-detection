@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -8,6 +10,8 @@ from fastapi import FastAPI
 
 from src.storage import Database, EventStore, FAISSStore, StorageConfig
 from src.api.routers import events, search, websocket
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(
@@ -35,6 +39,19 @@ def create_app(
         application.state.db.init()
         application.state.faiss_store.init()
         application.state.detector_reset_pending = False
+
+        # Pre-load Wav2Vec2 + DINOv2 in a background thread so the first
+        # similarity-search request does not block for ~60 s.
+        def _preload_encoder() -> None:
+            try:
+                from src.api.routers.search import _get_encoder
+                _get_encoder()
+                logger.info("Encoder models preloaded successfully.")
+            except Exception as exc:
+                logger.warning("Encoder preload failed: %s", exc)
+
+        threading.Thread(target=_preload_encoder, daemon=True).start()
+
         yield
 
     app = FastAPI(

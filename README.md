@@ -20,7 +20,7 @@ El sistema procesa continuamente audio del micrófono y video de la cámara para
 
 ## Arquitectura general
 
-El sistema corre como dos procesos Python independientes que se comunican via HTTP:
+El sistema corre como **tres procesos Python independientes** que se comunican via HTTP:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -57,13 +57,15 @@ El sistema corre como dos procesos Python independientes que se comunican via HT
 ### Flujo de datos
 
 ```
-ventana de audio (2048 samples, float32)
+ventana de audio (4096 samples, float32)
   └─► AudioProcessor.process_window()
-        ├─ Scattering1D (Kymatio)      →  126 coeficientes
-        ├─ Wavelet energy (db4, l=5)   →    6 valores
+        ├─ Scattering1D (Kymatio)      →  coeficientes (dinámico según J, Q)
+        ├─ Wavelet energy (db4, l=7)   →    8 valores
         ├─ RMS                         →    1 valor
         └─ ZCR                         →    1 valor
-                                       = 134-dim FeatureVector
+                                       + spectral (centroid, flatness, rolloff, bandwidth)
+                                       + delta features
+                                       = dynamic-dim FeatureVector
         └─► AnomalyDetector.score()
               └─► AnomalyResult (anomaly_score ∈ [0,1], is_anomaly)
                     └─[si anomalía]
@@ -87,13 +89,13 @@ ventana de audio (2048 samples, float32)
 
 La Transformada Wavelet Discreta descompone la señal en múltiples escalas de resolución temporal-frecuencial. Se usa la wavelet **Daubechies-4** (`db4`) por su buen balance entre resolución en tiempo y frecuencia, y su capacidad para capturar transientes (inicio de sonidos, impactos) que las técnicas estacionarias como FFT no detectan bien.
 
-Con `level=5` se obtienen 6 arrays de coeficientes (1 aproximación + 5 detalles), uno por escala. De cada array se calcula la **energía** (suma de cuadrados), produciendo un vector de 6 dimensiones que representa la distribución de energía a través de las escalas.
+Con `level=7` se obtienen 8 arrays de coeficientes (1 aproximación + 7 detalles), uno por escala. De cada array se calcula la **energía** (suma de cuadrados), produciendo un vector de 8 dimensiones que representa la distribución de energía a través de las escalas.
 
 ```python
-coeffs = pywt.wavedec(window, 'db4', level=5)
-# → [cA5, cD5, cD4, cD3, cD2, cD1]
+coeffs = pywt.wavedec(window, 'db4', level=7)
+# → [cA7, cD7, cD6, cD5, cD4, cD3, cD2, cD1]
 energies = [np.sum(c**2) for c in coeffs]
-# → energía por escala: [E_approx, E_detail_5, ..., E_detail_1]
+# → energía por escala: [E_approx, E_detail_7, ..., E_detail_1]
 ```
 
 ### Transformada de Scattering de Wavelets (Kymatio)
@@ -112,11 +114,11 @@ Donde `ψ_j` son wavelets Morlet a escala `2^j`. Los parámetros usados son:
 
 | Parámetro | Valor | Significado |
 |---|---|---|
-| `J=6` | 6 octavas | Escala máxima: `2^6 = 64` samples |
+| `J=8` | 8 octavas | Escala máxima: `2^8 = 256` samples |
 | `Q=8` | 8 filtros/octava | Balance resolución frecuencial vs. cómputo |
-| `shape=2048` | tamaño de ventana | Potencia de 2 requerida por los filter banks |
+| `shape=4096` | tamaño de ventana | Potencia de 2 requerida por los filter banks |
 
-La salida (n_coefs × T) se reduce haciendo **mean pooling sobre el eje temporal**, produciendo 126 coeficientes que son invariantes locales a traslaciones. Esta representación es mucho más discriminativa y estable que un espectrograma estándar para señales ruidosas.
+La salida (n_coefs × T) se reduce haciendo **mean pooling sobre el eje temporal**, produciendo un vector de coeficientes (dimensión dinámica según J y Q) que son invariantes locales a traslaciones. Esta representación es mucho más discriminativa y estable que un espectrograma estándar para señales ruidosas.
 
 > **Nota de compatibilidad:** `kymatio.numpy` falla en scipy ≥ 1.17 porque `scipy.special.sph_harm` fue eliminado. Se importa directamente desde el submodule: `from kymatio.scattering1d.frontend.numpy_frontend import ScatteringNumPy1D`.
 
@@ -128,13 +130,13 @@ La salida (n_coefs × T) se reduce haciendo **mean pooling sobre el eje temporal
 ### Segmentación en ventanas solapadas
 
 ```
-|← 2048 →|
+|← 4096 →|
 |████████|
-    |████████|  ← hop = 512 (75% overlap)
+    |████████|  ← hop = 1024 (75% overlap)
         |████████|
 ```
 
-El solapamiento del 75% (hop=512 sobre window=2048) asegura que transientes cortos no queden divididos entre dos ventanas y se capturan en al menos una con amplitud máxima.
+El solapamiento del 75% (hop=1024 sobre window=4096) asegura que transientes cortos no queden divididos entre dos ventanas y se capturan en al menos una con amplitud máxima.
 
 ### EMD — Descomposición en Modos Empíricos (análisis offline)
 
@@ -155,17 +157,17 @@ El detector usa **Isolation Forest** (`scikit-learn`), un algoritmo de detecció
 IsolationForest no soporta aprendizaje incremental. Se usa un protocolo de **buffer ring + refit periódico**:
 
 ```
-buffer = deque(maxlen=200)   # ventana deslizante
+buffer = deque(maxlen=500)   # ventana deslizante
 
 por cada ventana de audio:
     buffer.append(feature_vector)
 
-    si len(buffer) == 200 y no fitted:
+    si len(buffer) == 500 y no fitted:
         model.fit(buffer)    # primer entrenamiento
         is_fitted = True
 
-    si fitted y samples_since_refit >= 100:
-        model.fit(buffer)    # reentrenamiento sobre los últimos 200 samples
+    si fitted y samples_since_refit >= 200:
+        model.fit(buffer)    # reentrenamiento sobre los últimos 500 samples
         samples_since_refit = 0
 ```
 
@@ -185,7 +187,7 @@ Un evento se considera anomalía cuando `raw_score < model.offset_` (threshold d
 
 #### Fase de calentamiento
 
-Durante las primeras ~200 ventanas (~25s de audio a 16kHz con 2048/512), el detector devuelve `is_fitted=False` y `anomaly_score=0.0`. El dashboard muestra "Calentando..." durante este período.
+Durante las primeras ~500 ventanas (~2 min de audio a 16kHz con 4096/1024), el detector devuelve `is_fitted=False` y `anomaly_score=0.0`. El dashboard muestra "Calentando..." durante este período.
 
 ---
 
@@ -292,12 +294,14 @@ eventos/
 3. **Dilatación** → conecta regiones fragmentadas del mismo objeto
 4. **`findContours`** → extrae contornos del foreground
 5. Filtrado por `min_contour_area=500 px²` → descarta falsos positivos pequeños
-6. `boundingRect` sobre cada contorno → `BoundingBox(x, y, w, h, area)`
+6. `boundingRect` sobre cada contorno → `BoundingBox(x, y, w, h, area, source_score=0.0)`
+7. **Merge de cajas cercanas:** cajas cuyas aristas están a ≤`merge_gap` px se fusionan en una sola (default: 0 = solo cajas que se tocan/superponen). Una caja fusionada no puede superar `max_box_ratio` (40%) del área del frame, evitando mega-cajas.
+8. **Temporal weights (IoU tracking):** cada caja se compara con las del frame anterior por IoU. Cajas nuevas (IoU<0.3) reciben peso=1.0; persistentes (IoU≥0.3) reciben peso=0.5.
 
 ```python
-result = motion_detector.detect_with_result(frame)
-# result.boxes → lista de BoundingBox ordenada por área descendente
-# result.annotated_frame → frame con rectángulos verdes dibujados
+result = motion_detector.detect(frame)
+# result → lista de BoundingBox con source_score = temporal_weight (asignado por el detector)
+# El pipeline luego calcula: source_score = anomaly_score × area_ratio × temporal_weight
 ```
 
 ---
@@ -312,11 +316,13 @@ Base URL: `http://localhost:8000`
 | `GET` | `/events/{id}` | Detalle de un evento |
 | `GET` | `/events/{id}/audio` | Stream del archivo WAV |
 | `GET` | `/events/{id}/frame` | Stream del JPEG |
+| `GET` | `/events/{id}/frame/annotated` | Frame JPEG con bounding box de la fuente más probable (rectángulo rojo + label `source X.XXX`) |
 | `GET` | `/events/{id}/offline_analysis` | EMD + mel-spectrogram del audio del evento |
 | `DELETE` | `/events/{id}` | Elimina un evento (DB + filesystem; entrada FAISS queda huérfana) |
 | `DELETE` | `/events/` | Elimina todos los eventos y resetea el índice FAISS |
 | `POST` | `/search/similar` | Upload audio/imagen → top-k eventos similares por cosine (máx. 10 MB) |
-| `WS` | `/ws/stream` | WebSocket: push de `AnomalyScoreMessage` en tiempo real |
+| `GET` | `/search/similar/by-event/{id}` | Busca eventos similares a uno ya almacenado usando su embedding pre-computado. Instantáneo (no carga modelos). Excluye el evento fuente. |
+| `WS` | `/ws/stream` | WebSocket: push de `AnomalyScoreMessage` en tiempo real (incluye `motion_energy` y `source_score`) |
 | `POST` | `/internal/score` | Usado internamente por el pipeline para broadcast WS |
 | `POST` | `/internal/reset-detector` | Señaliza al pipeline que resetee su `AnomalyDetector` |
 | `GET` | `/internal/reset-pending` | Polling del pipeline: retorna `{"pending": bool}` y limpia el flag |
@@ -330,7 +336,8 @@ Documentación interactiva disponible en `http://localhost:8000/docs` (Swagger U
 Cuatro páginas accesibles desde el sidebar:
 
 ### Live Monitor
-- Indicadores en tiempo real: anomaly score, estado del detector, fase de calentamiento
+- Indicadores en tiempo real: anomaly score, estado del detector, fase de calentamiento, **motion energy**
+- Chip **"Fuente probable"**: coordenadas y `source_score` de la caja top-1 que correlaciona con la anomalía
 - Historial de scores y amplitud RMS (últimas 256 ventanas) con Plotly
 - Actualización automática cada segundo via WebSocket
 - Botón **Reiniciar historial**: limpia los gráficos de la sesión actual
@@ -338,14 +345,17 @@ Cuatro páginas accesibles desde el sidebar:
 
 ### Event Feed
 - Lista de eventos con filtros por score mínimo y orden
-- Reproducción de audio (`st.audio`) y visualización de frame (`st.image`) por evento
+- Reproducción de audio (`st.audio`) y visualización de frame anotado (con bounding box de fuente dibujado) por evento
 - Botón **Eliminar evento** por cada evento individual
 - Botón **Borrar todo**: elimina todos los eventos, filesystem y FAISS
 
 ### Similarity Search
-- Upload de archivo de audio o imagen
-- Búsqueda por similitud semántica en el índice FAISS
+- **Dos modos de búsqueda:**
+  - 📁 **Subir archivo**: upload de audio o imagen → encoding on-the-fly (puede tardar ~60s la primera vez)
+  - 📋 **Evento existente**: seleccionar un evento guardado → usa su embedding pre-computado → **respuesta instantánea** sin carga de modelos
 - Resultados en grid con score de similitud coseno
+- Frames mostrados con bounding box de fuente anotado
+- Tarjeta de previsualización del evento de consulta (modo evento existente)
 
 ### Offline Analysis
 - Selección de evento guardado
@@ -379,7 +389,7 @@ dsp-idea/
 │   │   ├── dependencies.py    # get_db(), get_faiss_store(), get_event_store()
 │   │   └── routers/
 │   │       ├── events.py      # CRUD eventos + offline analysis (EMD)
-│   │       ├── search.py      # POST /search/similar
+│   │       ├── search.py      # POST /search/similar + GET /search/similar/by-event/{id}
 │   │       └── websocket.py   # WS /ws/stream + POST /internal/score
 │   ├── embeddings/
 │   │   ├── config.py          # EmbeddingConfig (model IDs, dims, device)
@@ -387,9 +397,9 @@ dsp-idea/
 │   │   ├── image_encoder.py   # ImageEncoder (DINOv2, lazy load, offline-first)
 │   │   └── encoder.py         # MultimodalEncoder (concat + L2-norm → 1536-dim)
 │   ├── vision/
-│   │   ├── config.py          # VisionConfig (MOG2 params, min_contour_area, etc.)
-│   │   ├── types.py           # BoundingBox, MotionResult dataclasses
-│   │   ├── motion.py          # MotionDetector (MOG2 + morfología + contornos)
+│   │   ├── config.py          # VisionConfig (MOG2 params, min_contour_area, merge_gap, max_box_ratio)
+│   │   ├── types.py           # BoundingBox (con source_score), MotionResult dataclasses
+│   │   ├── motion.py          # MotionDetector (MOG2 + morfología + contornos + merge + IoU temporal)
 │   │   └── capture.py         # FrameCapture (OpenCV, context manager)
 │   ├── dashboard/
 │   │   ├── api_client.py      # APIClient (httpx sync)
@@ -408,7 +418,9 @@ dsp-idea/
 │   ├── test_api.py
 │   ├── test_embeddings.py
 │   ├── test_vision.py
-│   └── test_dashboard.py
+│   ├── test_dashboard.py
+│   ├── test_pipeline.py
+│   └── test_sample.py
 ├── doc/
 │   ├── idea.md                # Especificación original del proyecto
 │   └── ...                    # Papers de referencia
@@ -518,19 +530,20 @@ Para detener: `Ctrl+C`
 
 ```bash
 poetry run pytest -v
-# 104 tests, ~3s
+# 183 tests, ~3s
 ```
 
 ### Ejecutar por módulo
 
 ```bash
-poetry run pytest tests/test_dsp.py -v        # 17 tests — DSP features
-poetry run pytest tests/test_detection.py -v  # 11 tests — Isolation Forest
-poetry run pytest tests/test_storage.py -v    # 20 tests — FAISS, SQLite, EventStore
-poetry run pytest tests/test_api.py -v        # 11 tests — FastAPI endpoints + WebSocket
+poetry run pytest tests/test_dsp.py -v        # 21 tests — DSP features
+poetry run pytest tests/test_detection.py -v  # 15 tests — Isolation Forest
+poetry run pytest tests/test_storage.py -v    # 36 tests — FAISS, SQLite, EventStore
+poetry run pytest tests/test_api.py -v        # 34 tests — FastAPI endpoints + WebSocket
 poetry run pytest tests/test_embeddings.py -v # 19 tests — encoders multimodales (mockeados)
-poetry run pytest tests/test_vision.py -v     # 15 tests — MOG2, FrameCapture
-poetry run pytest tests/test_dashboard.py -v  #  9 tests — APIClient
+poetry run pytest tests/test_vision.py -v     # 34 tests — MOG2, IoU, temporal weights, box merge
+poetry run pytest tests/test_dashboard.py -v  # 16 tests — APIClient + dashboard pages
+poetry run pytest tests/test_pipeline.py -v   #  6 tests — pipeline orchestration
 ```
 
 Todos los tests usan datos simulados (arrays numpy sintéticos, frames aleatorios, modelos mockeados). No requieren micrófono, cámara ni modelos descargados.
@@ -591,7 +604,7 @@ El pipeline de captura y procesamiento (DSP, detección, visión) es **completam
 
 ### Isolation Forest con buffer deslizante
 
-Isolation Forest no tiene `partial_fit`. El buffer ring de 200 muestras con refit cada 100 nuevas muestras es un compromiso pragmático: el modelo se adapta al perfil de la señal reciente sin requerir arquitecturas de streaming complejas (River, Vowpal Wabbit). El buffer de 200 ventanas cubre ~25 segundos de audio real, suficiente para capturar variabilidad ambiental.
+Isolation Forest no tiene `partial_fit`. El buffer ring de 500 muestras con refit cada 200 nuevas muestras es un compromiso pragmático: el modelo se adapta al perfil de la señal reciente sin requerir arquitecturas de streaming complejas (River, Vowpal Wabbit). El buffer de 500 ventanas cubre ~2 minutos de audio real, suficiente para capturar variabilidad ambiental.
 
 ### SQLite síncrono en lugar de asyncpg
 
@@ -632,13 +645,11 @@ En macOS, PyTorch y OpenCV ambos linkan contra el framework Accelerate/OpenMP. C
 
 | Limitación | Descripción | Posible mejora |
 |---|---|---|
-| Fase de calentamiento | ~25s sin detección al inicio | Precargar un modelo guardado de sesiones anteriores |
-| Embeddings on-demand | Los modelos Wav2Vec2/DINOv2 solo se cargan al confirmar anomalía | Pool de workers para encoding asíncrono |
-| Búsqueda en SQLite | `list_events()` carga todos los eventos para encontrar por `faiss_index_id` | Índice en columna `faiss_index_id`, o tabla de mapeo ID↔evento |
 | Sin GPU | Todo corre en CPU por defecto | Cambiar `device='cuda'` en `EmbeddingConfig` si hay GPU disponible |
 | Sin sincronización audio-video | MOG2 y DSP corren en threads independientes sin timestamp compartido | Cola de pares (audio_window, frame) con timestamp aligned |
-| Umbral fijo de anomalía | `IsolationForest.offset_` es fijo tras cada fit | Umbral adaptativo con percentil del score del buffer |
 | FAISS no distribuido | Índice en un solo archivo local | Migrar a Qdrant para escalado horizontal |
+| Source correlation heurística | `source_score` usa IoU temporal + área ratio; no hay beamforming real | Audio-based localization con array de micrófonos |
+| Motion energy solo informativo | Se muestra en dashboard y metadata pero no suprime anomalías | Gate activo cuando haya datos etiquetados para calibrar umbral |
 
 ---
 

@@ -134,6 +134,7 @@ def render(client: APIClient) -> None:
     is_anomaly = msg.get("is_anomaly", False) if msg else False
     is_fitted  = msg.get("is_fitted",  False) if msg else False
     win_idx    = msg.get("window_index", 0)   if msg else 0
+    motion_e   = msg.get("motion_energy", 0.0) if msg else 0.0
     ts_str     = (msg.get("timestamp", "")[:19].replace("T", " ")) if msg else "—"
     connected  = msg is not None
 
@@ -167,9 +168,10 @@ def render(client: APIClient) -> None:
         m1.metric("Ventana", f"#{win_idx}")
         m2.metric("Última detección", ts_str)
 
-        m3, m4 = st.columns(2)
+        m3, m4, m5 = st.columns(3)
         m3.metric("Detector", "Listo ✓" if is_fitted else "Calentando…")
         m4.metric("Pipeline", "Conectado" if connected else "Sin conexión")
+        m5.metric("Motion energy", f"{motion_e:.3f}")
 
         st.html("<div style='height:0.5rem'></div>")
         rc1, rc2 = st.columns(2)
@@ -215,21 +217,38 @@ def render(client: APIClient) -> None:
     # ── Bounding boxes ───────────────────────────────────────────────────────
     if msg and msg.get("bounding_boxes"):
         boxes = msg["bounding_boxes"]
-        chips = "".join(
-            f'<span style="background:#FEE2E2;color:#B91C1C;border-radius:6px;'
-            f'padding:3px 10px;font-size:0.8rem;font-weight:600;margin:2px;">'
-            f'({b["x"]},{b["y"]}) {b["w"]}×{b["h"]}</span>'
-            for b in boxes
+        best = max(
+            boxes,
+            key=lambda b: b.get("source_score", 0),
         )
+        ss = best.get("source_score", 0)
         st.html(f"""
-        <div style="background:white;border-radius:12px;padding:1rem 1.5rem;
-                    border-left:4px solid {PALETTE['anomaly']};margin-top:0.5rem;
-                    box-shadow:0 1px 3px rgba(0,0,0,0.06);">
-          <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.08em;
-               text-transform:uppercase;color:{PALETTE['muted']};margin-bottom:0.5rem;">
-            Regiones de movimiento — {len(boxes)} bbox(s)
+        <div style="background:white;
+                    border-radius:12px;
+                    padding:1rem 1.5rem;
+                    border-left:4px solid
+                    {PALETTE['anomaly']};
+                    margin-top:0.5rem;
+                    box-shadow:0 1px 3px
+                    rgba(0,0,0,0.06);">
+          <div style="font-size:0.72rem;
+               font-weight:600;
+               letter-spacing:0.08em;
+               text-transform:uppercase;
+               color:{PALETTE['muted']};
+               margin-bottom:0.5rem;">
+            Fuente probable
           </div>
-          <div style="display:flex;flex-wrap:wrap;gap:0.25rem;">{chips}</div>
+          <span style="background:#FEE2E2;
+                color:#B91C1C;
+                border-radius:6px;
+                padding:4px 12px;
+                font-size:0.85rem;
+                font-weight:700;">
+            ({best['x']},{best['y']})
+            {best['w']}&times;{best['h']}
+            &mdash; score {ss:.3f}
+          </span>
         </div>
         """)
 
