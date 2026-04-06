@@ -437,7 +437,8 @@ def test_drift_metrics_keys():
     expected = {
         "adaptive_threshold",
         "score_mean",
-        "feature_mean_drift",
+        "drift_auc",
+        "top_drift_features",
         "refit_count",
     }
     assert set(m.keys()) == expected
@@ -461,7 +462,7 @@ def test_refit_count_increments():
 
 
 def test_feature_drift_after_shift():
-    """Feature mean drift should increase after distribution shift."""
+    """C2ST drift AUC should be high after distribution shift."""
     cfg = DetectorConfig(
         buffer_size=30,
         refit_every=30,
@@ -476,7 +477,9 @@ def test_feature_drift_after_shift():
     for fv in make_normal_vectors(35, seed=0):
         det.score(fv)
 
-    drift_1 = det.get_drift_metrics()["feature_mean_drift"]
+    auc_1 = det.get_drift_metrics()["drift_auc"]
+    # First refit has no previous buffer → default 0.5
+    assert auc_1 == pytest.approx(0.5, abs=0.01)
 
     # Phase 2: feed shifted distribution to trigger refit
     rng = np.random.default_rng(42)
@@ -487,8 +490,11 @@ def test_feature_drift_after_shift():
     for fv in shifted:
         det.score(fv)
 
-    drift_2 = det.get_drift_metrics()["feature_mean_drift"]
-    assert drift_2 > drift_1
+    m = det.get_drift_metrics()
+    # Easy to separate → AUC should be well above 0.5
+    assert m["drift_auc"] > 0.7
+    # Should report which features changed
+    assert len(m["top_drift_features"]) > 0
 
 
 def test_pca_save_load_state(tmp_path):
@@ -535,5 +541,42 @@ def test_reset_clears_drift_state():
     det.reset()
     m = det.get_drift_metrics()
     assert m["refit_count"] == 0
-    assert m["feature_mean_drift"] == 0.0
+    assert m["drift_auc"] == 0.5
+    assert m["top_drift_features"] == []
     assert det._pca is None
+
+
+def test_c2st_no_drift_low_auc():
+    """Same distribution in both buffers → AUC near 0.5.
+
+    With 200 samples and 150 dims the RF cross-val AUC
+    should stay moderate when both buffers come from the
+    same N(0, 0.5) distribution.
+    """
+    cfg = DetectorConfig(
+        buffer_size=200,
+        refit_every=200,
+        n_estimators=10,
+        hysteresis_count=1,
+        enable_drift_detection=True,
+        enable_adaptive_threshold=False,
+    )
+    det = AnomalyDetector(cfg)
+    # Two consecutive fits on same distribution
+    for fv in make_normal_vectors(420, seed=0):
+        det.score(fv)
+
+    m = det.get_drift_metrics()
+    # Cannot separate → AUC should stay well below 0.85
+    assert m["drift_auc"] < 0.85
+
+
+def test_feature_names_builder():
+    """_build_feature_names returns correct length."""
+    names = AnomalyDetector._build_feature_names(251)
+    assert len(names) == 251
+    assert names[0] == "scat_0"
+    assert "rms" in names
+    assert "spectral_centroid" in names
+    assert "delta_rms" in names
+    assert names[-1] == "delta_scat_energy"

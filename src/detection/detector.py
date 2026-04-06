@@ -7,7 +7,11 @@ from typing import Optional
 
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.ensemble import IsolationForest
+from sklearn.ensemble import (
+    IsolationForest,
+    RandomForestClassifier,
+)
+from sklearn.model_selection import cross_val_score
 
 from .config import DetectorConfig
 from .types import AnomalyResult
@@ -107,10 +111,11 @@ class AnomalyDetector:
         # PCA — fitted alongside the IF model
         self._pca: Optional[PCA] = None
 
-        # Drift detection state
+        # Drift detection state (C2ST)
         self._refit_count: int = 0
-        self._prev_feature_mean: Optional[np.ndarray] = None
-        self._feature_mean_drift: float = 0.0
+        self._prev_buffer: Optional[np.ndarray] = None
+        self._drift_auc: float = 0.5
+        self._top_drift_features: list[str] = []
         self._adaptive_threshold: float = 0.0
         self._score_mean: float = 0.0
 
@@ -286,8 +291,11 @@ class AnomalyDetector:
                 "score_mean": round(
                     self._score_mean, 6,
                 ),
-                "feature_mean_drift": round(
-                    self._feature_mean_drift, 6,
+                "drift_auc": round(
+                    self._drift_auc, 4,
+                ),
+                "top_drift_features": (
+                    self._top_drift_features.copy()
                 ),
                 "refit_count": self._refit_count,
             }
@@ -306,8 +314,9 @@ class AnomalyDetector:
             self._recent_norm_scores.clear()
             self._normalizer = None
             self._refit_count = 0
-            self._prev_feature_mean = None
-            self._feature_mean_drift = 0.0
+            self._prev_buffer = None
+            self._drift_auc = 0.5
+            self._top_drift_features = []
             self._adaptive_threshold = 0.0
             self._score_mean = 0.0
 
@@ -334,7 +343,7 @@ class AnomalyDetector:
                 ),
                 "recent_scores": list(self._recent_scores),
                 "refit_count": self._refit_count,
-                "prev_feature_mean": self._prev_feature_mean,
+                "prev_buffer": self._prev_buffer,
             }
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "wb") as f:
@@ -364,8 +373,8 @@ class AnomalyDetector:
                 self._refit_count = state.get(
                     "refit_count", 0
                 )
-                self._prev_feature_mean = state.get(
-                    "prev_feature_mean"
+                self._prev_buffer = state.get(
+                    "prev_buffer"
                 )
                 norm_state = state.get("normalizer")
                 if norm_state is not None:
@@ -382,22 +391,112 @@ class AnomalyDetector:
     #  Internal                                                           #
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    def _build_feature_names(dim: int) -> list[str]:
+        """Build human-readable names for each feature.
+
+        Layout (from AudioProcessor):
+          [0 .. n_scat-1]  scattering coefficients
+          [n_scat .. +8]   wavelet energy bands
+          [+0, +1]         RMS, ZCR
+          [+0..+3]         centroid, flatness, rolloff, bw
+          [+0..+2]         delta_rms, delta_centroid, delta_scat
+        """
+        names: list[str] = []
+        # Scattering (the bulk): we don't know J/Q
+        # here, so label generically with index.
+        n_wavelet = 8  # level=7 → 8 bands
+        n_temporal = 2
+        n_spectral = 4
+        n_delta = 3
+        n_suffix = (
+            n_wavelet + n_temporal + n_spectral + n_delta
+        )
+        n_scat = dim - n_suffix
+        if n_scat < 0:  # safety
+            return [f"f{i}" for i in range(dim)]
+
+        for i in range(n_scat):
+            names.append(f"scat_{i}")
+        for k in range(n_wavelet):
+            names.append(f"wavelet_band_{k}")
+        names += ["rms", "zcr"]
+        names += [
+            "spectral_centroid",
+            "spectral_flatness",
+            "spectral_rolloff",
+            "spectral_bandwidth",
+        ]
+        names += [
+            "delta_rms", "delta_centroid",
+            "delta_scat_energy",
+        ]
+        # Trim / pad to exact dim
+        names = names[:dim]
+        while len(names) < dim:
+            names.append(f"f{len(names)}")
+        return names
+
+    def _run_c2st(
+        self, X_prev: np.ndarray, X_curr: np.ndarray,
+    ) -> tuple[float, list[str]]:
+        """Classifier Two-Sample Test.
+
+        Train a HistGradientBoosting classifier to separate
+        the previous buffer (label 0) from the current one
+        (label 1).  Returns (auc, top_5_feature_names).
+
+        AUC ≈ 0.5 → no drift.  AUC >> 0.5 → drift.
+        """
+        n0, n1 = len(X_prev), len(X_curr)
+        X = np.vstack([X_prev, X_curr])
+        y = np.concatenate([
+            np.zeros(n0), np.ones(n1),
+        ])
+        clf = RandomForestClassifier(
+            n_estimators=self._config.c2st_n_estimators,
+            max_depth=4,
+            random_state=self._config.random_state,
+        )
+        # 3-fold CV AUC (fast on small data)
+        n_folds = min(3, min(n0, n1))
+        if n_folds < 2:
+            return 0.5, []
+        aucs = cross_val_score(
+            clf, X, y,
+            cv=n_folds, scoring="roc_auc",
+        )
+        # Symmetrise: AUC < 0.5 means labels were learned
+        # in reverse; the separation power is the same.
+        auc = float(max(np.mean(aucs), 1 - np.mean(aucs)))
+
+        # Feature importance: fit on all data
+        clf.fit(X, y)
+        importances = clf.feature_importances_
+        dim = X.shape[1]
+        feat_names = self._build_feature_names(dim)
+        top_idx = np.argsort(importances)[::-1][:5]
+        top_names = [
+            feat_names[i] for i in top_idx
+            if importances[i] > 0
+        ]
+        return auc, top_names
+
     def _fit(self) -> None:
         # Caller must hold self._lock
         X = np.array(list(self._buffer), dtype=np.float32)
 
-        # Drift: compute feature-mean shift vs previous fit
-        current_mean = X.mean(axis=0)
+        # C2ST drift detection: compare previous vs current
         if (
             self._config.enable_drift_detection
-            and self._prev_feature_mean is not None
+            and self._prev_buffer is not None
         ):
-            self._feature_mean_drift = float(
-                np.linalg.norm(
-                    current_mean - self._prev_feature_mean
-                )
+            auc, top_feats = self._run_c2st(
+                self._prev_buffer, X,
             )
-        self._prev_feature_mean = current_mean
+            self._drift_auc = auc
+            self._top_drift_features = top_feats
+        self._prev_buffer = X.copy()
 
         # PCA: fit on the buffer, then transform
         if self._config.enable_pca:

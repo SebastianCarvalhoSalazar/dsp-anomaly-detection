@@ -244,7 +244,7 @@ def render(client: APIClient) -> None:
                 msg.get("adaptive_threshold", 0.0)
             )
             st.session_state.drift_history.append(
-                msg.get("feature_mean_drift", 0.0)
+                msg.get("drift_auc", 0.5)
             )
         except queue.Empty:
             break
@@ -256,7 +256,8 @@ def render(client: APIClient) -> None:
     win_idx    = msg.get("window_index", 0)   if msg else 0
     motion_e   = msg.get("motion_energy", 0.0) if msg else 0.0
     refit_n    = msg.get("refit_count", 0)     if msg else 0
-    drift_val  = msg.get("feature_mean_drift", 0.0) if msg else 0.0
+    drift_auc  = msg.get("drift_auc", 0.5) if msg else 0.5
+    top_feats  = msg.get("top_drift_features", []) if msg else []
     ts_str     = (msg.get("timestamp", "")[:19].replace("T", " ")) if msg else "—"
     connected  = msg is not None
 
@@ -298,9 +299,15 @@ def render(client: APIClient) -> None:
         m6, m7 = st.columns(2)
         m6.metric("Refits", str(refit_n))
         m7.metric(
-            "Feature drift",
-            f"{drift_val:.4f}",
+            "Drift AUC",
+            f"{drift_auc:.3f}",
+            help="C2ST: 0.5 = sin drift, 1.0 = drift total",
         )
+        if top_feats:
+            feat_str = ", ".join(top_feats[:3])
+            st.caption(
+                f"\u26a0\ufe0f Top drift: {feat_str}"
+            )
 
         st.html("<div style='height:0.5rem'></div>")
         rc1, rc2 = st.columns(2)

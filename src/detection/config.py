@@ -40,5 +40,8 @@ class DetectorConfig:
     enable_pca: bool = True
     pca_components: int = 25  # 99% variance in ~9; 25 adds safety margin
 
-    # -- Drift detection ----------------------------------------------------
+    # -- Drift detection (C2ST) -----------------------------------------------
     enable_drift_detection: bool = True
+    # Number of trees in the HistGradientBoosting classifier
+    # used for the Classifier Two-Sample Test (C2ST).
+    c2st_n_estimators: int = 50

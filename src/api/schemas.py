@@ -36,7 +36,8 @@ class AnomalyScoreMessage(BaseModel):
     # Drift detection metrics
     adaptive_threshold: float = 0.0
     score_mean: float = 0.0
-    feature_mean_drift: float = 0.0
+    drift_auc: float = 0.5
+    top_drift_features: list[str] = []
     refit_count: int = 0
 
 
