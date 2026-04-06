@@ -189,6 +189,37 @@ Un evento se considera anomalía cuando `raw_score < model.offset_` (threshold d
 
 Durante las primeras ~500 ventanas (~2 min de audio a 16kHz con 4096/1024), el detector devuelve `is_fitted=False` y `anomaly_score=0.0`. El dashboard muestra "Calentando..." durante este período.
 
+### PCA — Reducción de dimensionalidad
+
+Antes de alimentar el Isolation Forest, el vector de features (251 dimensiones) se reduce a **25 componentes** mediante **PCA** (`sklearn.decomposition.PCA`). Se ajusta junto con el IF en cada refit.
+
+```python
+pca = PCA(n_components=25)
+X_reduced = pca.fit_transform(X)  # 251 → 25 dims
+model.fit(X_reduced)
+```
+
+Empíricamente, 9 componentes capturan >99% de la varianza; 25 es un margen de seguridad que preserva señales débiles sin perder la eficiencia del IF. El scoring aplica `pca.transform()` sobre cada vector individual antes de `score_samples()`.
+
+### C2ST — Detección de drift por Classifier Two-Sample Test
+
+Para medir si la distribución de features está cambiando entre refits sucesivos, se usa un **Classifier Two-Sample Test (C2ST)**:
+
+1. Se etiqueta el buffer anterior como clase 0 y el actual como clase 1
+2. Se entrena un `RandomForestClassifier` (50 árboles, `max_depth=4`) para distinguirlos
+3. Se evalúa con **3-fold cross-validated AUC**
+4. Se simetriza: `AUC = max(auc, 1 - auc)` para que siempre sea ≥ 0.5
+
+| AUC | Interpretación |
+|---|---|
+| ≈ 0.5 | Sin drift (buffers indistinguibles) |
+| 0.7–0.8 | Drift moderado |
+| > 0.9 | Drift severo (distribución cambió drásticamente) |
+
+Además, las **feature importances** del RF se mapean a nombres legibles (`scat_45`, `wavelet_band_3`, `spectral_centroid`, etc.) usando `_build_feature_names()`, y las **top-5** se reportan como `top_drift_features` para interpretar qué aspectos del audio cambiaron.
+
+Esto reemplaza la métrica anterior de L2 norm entre medias de features, que no era sensible a cambios en varianza o forma de la distribución.
+
 ---
 
 ## Modelos de embeddings
@@ -322,7 +353,7 @@ Base URL: `http://localhost:8000`
 | `DELETE` | `/events/` | Elimina todos los eventos y resetea el índice FAISS |
 | `POST` | `/search/similar` | Upload audio/imagen → top-k eventos similares por cosine (máx. 10 MB) |
 | `GET` | `/search/similar/by-event/{id}` | Busca eventos similares a uno ya almacenado usando su embedding pre-computado. Instantáneo (no carga modelos). Excluye el evento fuente. |
-| `WS` | `/ws/stream` | WebSocket: push de `AnomalyScoreMessage` en tiempo real (incluye `motion_energy` y `source_score`) |
+| `WS` | `/ws/stream` | WebSocket: push de `AnomalyScoreMessage` en tiempo real (incluye `motion_energy`, `source_score`, `drift_auc`, `top_drift_features`) |
 | `POST` | `/internal/score` | Usado internamente por el pipeline para broadcast WS |
 | `POST` | `/internal/reset-detector` | Señaliza al pipeline que resetee su `AnomalyDetector` |
 | `GET` | `/internal/reset-pending` | Polling del pipeline: retorna `{"pending": bool}` y limpia el flag |
@@ -336,9 +367,12 @@ Documentación interactiva disponible en `http://localhost:8000/docs` (Swagger U
 Cuatro páginas accesibles desde el sidebar:
 
 ### Live Monitor
-- Indicadores en tiempo real: anomaly score, estado del detector, fase de calentamiento, **motion energy**
+- Indicadores en tiempo real: anomaly score, estado del detector, fase de calentamiento, **motion energy**, **Drift AUC** (C2ST: 0.5 = sin drift, 1.0 = drift total)
+- **Top drift features**: caption con ⚠️ mostrando las 3 features más relevantes del drift detectado (e.g., `scat_45, wavelet_band_5, spectral_centroid`)
 - Chip **"Fuente probable"**: coordenadas y `source_score` de la caja top-1 que correlaciona con la anomalía
-- Historial de scores y amplitud RMS (últimas 256 ventanas) con Plotly
+- **Historial de scores** con overlay del umbral adaptativo (percentil 98 de scores normalizados [0,1], línea punteada)
+- **Amplitud RMS** (últimas 256 ventanas) con Plotly
+- **Distribución de scores (KDE)**: densidad estimada por kernel gaussiano (`scipy.stats.gaussian_kde`) de los scores recientes, con línea vertical del umbral adaptativo
 - Actualización automática cada segundo via WebSocket
 - Botón **Reiniciar historial**: limpia los gráficos de la sesión actual
 - Botón **Reiniciar detector**: envía señal al pipeline para resetear el Isolation Forest (reinicia warmup)
@@ -530,14 +564,14 @@ Para detener: `Ctrl+C`
 
 ```bash
 poetry run pytest -v
-# 183 tests, ~3s
+# 198 tests, ~4s
 ```
 
 ### Ejecutar por módulo
 
 ```bash
 poetry run pytest tests/test_dsp.py -v        # 21 tests — DSP features
-poetry run pytest tests/test_detection.py -v  # 15 tests — Isolation Forest
+poetry run pytest tests/test_detection.py -v  # 22 tests — Isolation Forest + PCA + C2ST drift
 poetry run pytest tests/test_storage.py -v    # 36 tests — FAISS, SQLite, EventStore
 poetry run pytest tests/test_api.py -v        # 34 tests — FastAPI endpoints + WebSocket
 poetry run pytest tests/test_embeddings.py -v # 19 tests — encoders multimodales (mockeados)

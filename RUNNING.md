@@ -124,7 +124,11 @@ Una vez el pipeline está corriendo, abre `http://localhost:8501` y explora las 
 
 **Live Monitor**
 - Habla o haz ruido cerca del micrófono — verás el anomaly score subir en tiempo real
-- El historial de scores y amplitud RMS se actualiza cada segundo
+- El **historial de scores** muestra una línea punteada del **umbral adaptativo** (percentil 98 de scores normalizados); se actualiza cada segundo
+- **Amplitud RMS**: barras que muestran la energía sonora reciente
+- **Distribución KDE**: gráfico de densidad estimada por kernel de los scores recientes, con línea vertical del umbral. Permite ver si los scores tienden a concentrarse en zona normal o anormal
+- **Drift AUC**: métrica del test C2ST (Classifier Two-Sample Test) que mide si la distribución de features está cambiando. 0.5 = sin drift, ≥ 0.8 = drift significativo
+- **Top drift features**: cuando hay drift, muestra ⚠️ con las features más relevantes (e.g., `scat_45, wavelet_band_5, spectral_centroid`) para entender qué aspecto del audio cambió
 - **Motion energy**: indicador que muestra el nivel de actividad visual detectada por la cámara
 - **Fuente probable**: chip rojo que muestra las coordenadas y `source_score` de la caja que más correlaciona con la anomalía acústica
 - **Reiniciar historial**: limpia los gráficos de la sesión (no afecta el detector)
@@ -162,7 +166,7 @@ Para verificar que todo el código funciona correctamente sin necesidad de hardw
 
 ```bash
 poetry run pytest -v
-# 183 tests, ~3 segundos
+# 198 tests, ~4 segundos
 ```
 
 ### Smoke test del pipeline DSP sin micrófono

@@ -41,7 +41,9 @@ Proceso principal síncrono. Orquesta todos los módulos de procesamiento.
 
 **Model preloading:** Al inicio de `run()`, los modelos Wav2Vec2+DINOv2 se precargan en un background thread paralelo al warmup, eliminando la penalización de ~60s en la primera anomalía.
 
-**Detector online:** `AnomalyDetector` usa Isolation Forest con buffer deslizante de 500 ventanas. Se re-entrena cada 200 ventanas nuevas. Features son Z-score normalizados (Welford online). Scores pasan por EMA smoothing (α=0.3) y requieren 3 ventanas consecutivas de anomalía (hysteresis) para confirmar. Umbral adaptativo con percentil 2.0 sobre ventana de 500 scores.
+**Detector online:** `AnomalyDetector` usa Isolation Forest con buffer deslizante de 500 ventanas. Se re-entrena cada 200 ventanas nuevas. Features son Z-score normalizados (Welford online), luego reducidos de 251 a **25 dimensiones con PCA** antes de alimentar el IF. Scores pasan por EMA smoothing (α=0.3) y requieren 3 ventanas consecutivas de anomalía (hysteresis) para confirmar. Umbral adaptativo con percentil 2.0 sobre ventana de 500 scores. Umbral visual: percentil 98 de scores normalizados [0,1].
+
+**C2ST drift detection:** En cada refit, un `RandomForestClassifier` (50 árboles, `max_depth=4`) intenta separar el buffer anterior del actual. AUC 3-fold CV simetrizado (`max(auc, 1-auc)`): 0.5 = sin drift, 1.0 = drift total. Las top-5 feature importances se mapean a nombres legibles vía `_build_feature_names()` (e.g., `scat_45`, `wavelet_band_3`, `spectral_centroid`) y se publican como `top_drift_features` en el payload WebSocket.
 
 ### 2. API (`src/api/`)
 FastAPI async. Expone datos almacenados y recibe notificaciones del pipeline.
@@ -57,7 +59,7 @@ FastAPI async. Expone datos almacenados y recibe notificaciones del pipeline.
 - `DELETE /events/` — elimina todos los eventos y llama `FAISSStore.clear()`
 - `POST /search/similar` — recibe audio o imagen (máx. 10 MB), genera embedding con `MultimodalEncoder`, busca k vecinos en FAISS, retorna metadata desde SQLite. Usa `db.get_event_by_faiss_id()` para lookups O(1).
 - `GET /search/similar/by-event/{event_id}` — busca eventos similares a uno ya almacenado usando su embedding pre-computado. No requiere carga de modelos → respuesta instantánea. Excluye el evento fuente de los resultados.
-- `WS /ws/stream` — WebSocket para el dashboard en tiempo real (incluye `motion_energy` y `source_score` en cada mensaje)
+- `WS /ws/stream` — WebSocket para el dashboard en tiempo real (incluye `motion_energy`, `source_score`, `drift_auc`, `top_drift_features` en cada mensaje)
 
 **Model preloading:** El lifespan handler lanza un background thread que pre-carga los modelos de embedding (Wav2Vec2+DINOv2) vía `_get_encoder()` con double-checked locking thread-safe. La primera búsqueda por upload no sufre cold-start de ~60s.
 
@@ -67,7 +69,7 @@ Instancias de `Database`, `FAISSStore` y `EventStore` se inyectan vía `request.
 Streamlit app que consume el API vía `APIClient` (httpx síncrono).
 
 Cuatro páginas; todas exponen `render(client: APIClient) -> None`:
-- **Live Monitor** — scores en tiempo real vía WebSocket, historial de score/RMS con Plotly, indicador de motion_energy, chip **"Fuente probable"** con coordenadas y source_score de la caja top-1; botones "Reiniciar historial" y "Reiniciar detector"
+- **Live Monitor** — scores en tiempo real vía WebSocket; historial de scores con overlay del umbral adaptativo (p98 normalizado, línea punteada); amplitud RMS; **distribución KDE** de scores recientes (gaussian_kde + umbral vertical); métrica **Drift AUC** (C2ST: 0.5=sin drift, 1.0=drift total) con caption ⚠️ de top drift features; indicador de motion_energy; chip **"Fuente probable"** con coordenadas y source_score de la caja top-1; botones "Reiniciar historial" y "Reiniciar detector"
 - **Event Feed** — grid con audio y frame anotado (bounding box de fuente dibujado); botones "Eliminar evento" y "Borrar todo"
 - **Similarity Search** — dos modos: (1) upload de query (audio o imagen) con encoding on-the-fly, (2) selección de evento existente que usa el embedding pre-computado (instantáneo). Resultados por similitud coseno. Frames mostrados con bounding box anotado.
 - **Offline Analysis** — IMFs de EMD + mel-spectrogram con Plotly
