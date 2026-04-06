@@ -175,6 +175,7 @@ class Pipeline:
             self._pre_audio_buffer.extend(window.tolist())
 
             feature_vec = self.dsp.process_window(window)
+            rms = float(np.sqrt(np.mean(window ** 2)))
             result = self.detector.score(feature_vec)
 
             with self._frame_lock:
@@ -208,7 +209,7 @@ class Pipeline:
                 self._last_motion_energy *= 0.9  # decay
 
             # Notify API (non-blocking fire-and-forget)
-            self._notify_api(result, boxes)
+            self._notify_api(result, boxes, rms=rms)
 
             if result.is_anomaly:
                 # Snapshot the pre-event buffer (last 3s) as the event audio
@@ -299,11 +300,11 @@ class Pipeline:
         except Exception as exc:
             logger.warning("Camera unavailable: %s", exc)
 
-    def _notify_api(self, result, boxes) -> None:
+    def _notify_api(self, result, boxes, *, rms: float = 0.0) -> None:
         """POST anomaly score to API for WebSocket broadcast (fire-and-forget).
 
-        The payload includes ``motion_energy`` so the dashboard can
-        correlate visual activity with the anomaly score in real time.
+        The payload includes ``motion_energy`` and ``rms`` so the dashboard
+        can correlate visual activity and audio amplitude in real time.
         """
         try:
             payload = {
@@ -325,7 +326,11 @@ class Pipeline:
                     for b in boxes
                 ],
                 "motion_energy": self._last_motion_energy,
+                "rms": round(rms, 6),
             }
+            # Drift detection metrics
+            drift = self.detector.get_drift_metrics()
+            payload.update(drift)
             httpx.post(API_INTERNAL_URL, json=payload, timeout=0.5)
         except Exception:
             pass  # API may not be running; score notification is best-effort

@@ -7,8 +7,10 @@ import threading
 import time
 from collections import deque
 
+import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
+from scipy.stats import gaussian_kde
 
 from src.dashboard.api_client import APIClient
 from src.dashboard.styles import (
@@ -43,36 +45,72 @@ def _ws_listener(msg_queue: queue.Queue, stop_event: threading.Event) -> None:
         pass
 
 
-def _score_chart(history: list[float], is_anomaly: bool) -> go.Figure:
+def _score_chart(
+    history: list[float],
+    is_anomaly: bool,
+    thresh_history: list[float] | None = None,
+) -> go.Figure:
     color = PALETTE["anomaly"] if is_anomaly else PALETTE["normal"]
-    fill  = hex_to_rgba(color, 0.12)
+    fill = hex_to_rgba(color, 0.12)
+    xs = list(range(len(history)))
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=list(range(len(history))),
-        y=history,
-        mode="lines",
-        fill="tozeroy",
+        x=xs, y=history,
+        mode="lines", fill="tozeroy",
         line=dict(color=color, width=2),
-        fillcolor=fill,
+        fillcolor=fill, name="score",
         hovertemplate="%{y:.3f}<extra></extra>",
     ))
-    fig.add_hline(
-        y=0.5, line_dash="dot",
-        line_color=PALETTE["warning"],
-        annotation_text="umbral",
-        annotation_position="top right",
-        annotation_font_color=PALETTE["warning"],
+
+    # Overlay adaptive threshold if available
+    has_thresh = (
+        thresh_history
+        and any(v > 0 for v in thresh_history)
     )
+    if has_thresh:
+        fig.add_trace(go.Scatter(
+            x=xs, y=thresh_history,
+            mode="lines",
+            line=dict(
+                color=PALETTE["warning"],
+                width=1.5, dash="dot",
+            ),
+            name="umbral",
+            hovertemplate="%{y:.3f}<extra></extra>",
+        ))
+    else:
+        fig.add_hline(
+            y=0.5, line_dash="dot",
+            line_color=PALETTE["warning"],
+            annotation_text="umbral",
+            annotation_position="top right",
+            annotation_font_color=PALETTE["warning"],
+        )
+
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=0, r=0, t=8, b=0),
         height=160,
-        yaxis=dict(range=[0, 1], showgrid=True, gridcolor="#F1F5F9",
-                   tickfont=dict(size=10, color=PALETTE["muted"]), zeroline=False),
-        xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-        showlegend=False,
+        yaxis=dict(
+            range=[0, 1], showgrid=True,
+            gridcolor="#F1F5F9",
+            tickfont=dict(
+                size=10, color=PALETTE["muted"],
+            ),
+            zeroline=False,
+        ),
+        xaxis=dict(
+            showgrid=False,
+            showticklabels=False,
+            zeroline=False,
+        ),
+        showlegend=has_thresh,
+        legend=dict(
+            orientation="h", x=0, y=1.12,
+            font=dict(size=10),
+        ),
     )
     return fig
 
@@ -99,6 +137,75 @@ def _rms_chart(history: list[float]) -> go.Figure:
     return fig
 
 
+def _score_kde_chart(
+    scores: list[float],
+    threshold: float = 0.5,
+) -> go.Figure:
+    """KDE of recent anomaly scores + threshold line."""
+    fig = go.Figure()
+    xs = np.linspace(0, 1, 200)
+
+    # Need at least 2 non-constant values for KDE
+    valid = [s for s in scores if s > 0]
+    if len(valid) >= 2 and np.std(valid) > 1e-9:
+        kde = gaussian_kde(valid, bw_method=0.15)
+        ys = kde(xs)
+        fig.add_trace(go.Scatter(
+            x=xs, y=ys,
+            mode="lines", fill="tozeroy",
+            line=dict(color="#8B5CF6", width=2),
+            fillcolor=hex_to_rgba("#8B5CF6", 0.10),
+            name="densidad",
+            hovertemplate="%{y:.2f}<extra></extra>",
+        ))
+        y_max = float(ys.max()) * 1.15
+    else:
+        y_max = 1.0
+
+    # Threshold vertical line
+    if threshold > 0:
+        fig.add_trace(go.Scatter(
+            x=[threshold, threshold],
+            y=[0, y_max],
+            mode="lines",
+            line=dict(
+                color=PALETTE["warning"],
+                width=1.5, dash="dot",
+            ),
+            name="umbral",
+            hoverinfo="skip",
+        ))
+
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=0, r=0, t=8, b=0),
+        height=140,
+        yaxis=dict(
+            showgrid=True, gridcolor="#F1F5F9",
+            tickfont=dict(
+                size=10, color=PALETTE["muted"],
+            ),
+            zeroline=False,
+            showticklabels=False,
+        ),
+        xaxis=dict(
+            showgrid=True, gridcolor="#F1F5F9",
+            tickfont=dict(
+                size=10, color=PALETTE["muted"],
+            ),
+            range=[0, 1],
+            zeroline=False,
+        ),
+        showlegend=True,
+        legend=dict(
+            orientation="h", x=0, y=1.15,
+            font=dict(size=10),
+        ),
+    )
+    return fig
+
+
 def render(client: APIClient) -> None:
     st.html(page_header(
         "Monitor en vivo",
@@ -109,6 +216,12 @@ def render(client: APIClient) -> None:
     if "rms_history" not in st.session_state:
         st.session_state.rms_history   = deque([0.0] * _HISTORY, maxlen=_HISTORY)
         st.session_state.score_history = deque([0.0] * _HISTORY, maxlen=_HISTORY)
+        st.session_state.thresh_history = deque(
+            [0.0] * _HISTORY, maxlen=_HISTORY,
+        )
+        st.session_state.drift_history = deque(
+            [0.0] * _HISTORY, maxlen=_HISTORY,
+        )
         st.session_state.ws_queue      = queue.Queue()
         st.session_state.ws_stop       = threading.Event()
         st.session_state.latest_msg    = None
@@ -125,7 +238,14 @@ def render(client: APIClient) -> None:
             st.session_state.latest_msg = msg
             score = msg.get("anomaly_score", 0.0)
             st.session_state.score_history.append(score)
-            st.session_state.rms_history.append(score * 0.3)
+            st.session_state.rms_history.append(msg.get("rms", 0.0))
+            # Drift metrics — normalize threshold to [0,1] score
+            st.session_state.thresh_history.append(
+                msg.get("adaptive_threshold", 0.0)
+            )
+            st.session_state.drift_history.append(
+                msg.get("feature_mean_drift", 0.0)
+            )
         except queue.Empty:
             break
 
@@ -135,6 +255,8 @@ def render(client: APIClient) -> None:
     is_fitted  = msg.get("is_fitted",  False) if msg else False
     win_idx    = msg.get("window_index", 0)   if msg else 0
     motion_e   = msg.get("motion_energy", 0.0) if msg else 0.0
+    refit_n    = msg.get("refit_count", 0)     if msg else 0
+    drift_val  = msg.get("feature_mean_drift", 0.0) if msg else 0.0
     ts_str     = (msg.get("timestamp", "")[:19].replace("T", " ")) if msg else "—"
     connected  = msg is not None
 
@@ -173,11 +295,20 @@ def render(client: APIClient) -> None:
         m4.metric("Pipeline", "Conectado" if connected else "Sin conexión")
         m5.metric("Motion energy", f"{motion_e:.3f}")
 
+        m6, m7 = st.columns(2)
+        m6.metric("Refits", str(refit_n))
+        m7.metric(
+            "Feature drift",
+            f"{drift_val:.4f}",
+        )
+
         st.html("<div style='height:0.5rem'></div>")
         rc1, rc2 = st.columns(2)
         if rc1.button("Reiniciar historial", use_container_width=True):
             st.session_state.score_history = deque([0.0] * _HISTORY, maxlen=_HISTORY)
             st.session_state.rms_history   = deque([0.0] * _HISTORY, maxlen=_HISTORY)
+            st.session_state.thresh_history = deque([0.0] * _HISTORY, maxlen=_HISTORY)
+            st.session_state.drift_history = deque([0.0] * _HISTORY, maxlen=_HISTORY)
             st.session_state.latest_msg    = None
         if rc2.button("Reiniciar detector", use_container_width=True):
             try:
@@ -196,7 +327,11 @@ def render(client: APIClient) -> None:
     </div>
     """)
     st.plotly_chart(
-        _score_chart(list(st.session_state.score_history), is_anomaly),
+        _score_chart(
+            list(st.session_state.score_history),
+            is_anomaly,
+            list(st.session_state.thresh_history),
+        ),
         use_container_width=True,
         config={"displayModeBar": False},
     )
@@ -210,6 +345,27 @@ def render(client: APIClient) -> None:
     """)
     st.plotly_chart(
         _rms_chart(list(st.session_state.rms_history)),
+        use_container_width=True,
+        config={"displayModeBar": False},
+    )
+
+    # ── Score distribution (KDE) ──────────────────────
+    st.html(f"""
+    <div style="font-size:0.78rem;font-weight:600;
+         letter-spacing:0.06em;
+         text-transform:uppercase;
+         color:{PALETTE['muted']};
+         margin-bottom:0.25rem;">
+      Distribuci\u00f3n de scores (KDE)
+    </div>
+    """)
+    _thresh = list(st.session_state.thresh_history)
+    _tval = _thresh[-1] if _thresh else 0.5
+    st.plotly_chart(
+        _score_kde_chart(
+            list(st.session_state.score_history),
+            threshold=_tval,
+        ),
         use_container_width=True,
         config={"displayModeBar": False},
     )

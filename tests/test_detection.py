@@ -330,3 +330,210 @@ def test_zscore_does_not_crash():
     for fv in vecs:
         result = det.score(fv)
     assert result.is_fitted
+
+
+# -------------------------------------------------------------------
+# PCA dimensionality reduction
+# -------------------------------------------------------------------
+
+def test_pca_reduces_dimensionality():
+    """With PCA enabled the IF receives fewer features."""
+    cfg = DetectorConfig(
+        buffer_size=50,
+        refit_every=25,
+        n_estimators=20,
+        hysteresis_count=1,
+        enable_adaptive_threshold=False,
+        enable_pca=True,
+        pca_components=10,
+    )
+    det = AnomalyDetector(cfg)
+    for fv in make_normal_vectors(60):
+        det.score(fv)
+
+    assert det._is_fitted
+    assert det._pca is not None
+    assert det._pca.n_components == 10
+
+
+def test_pca_disabled_by_default_override():
+    """With PCA disabled, no PCA object is created."""
+    cfg = DetectorConfig(
+        buffer_size=50,
+        refit_every=25,
+        n_estimators=20,
+        hysteresis_count=1,
+        enable_adaptive_threshold=False,
+        enable_pca=False,
+    )
+    det = AnomalyDetector(cfg)
+    for fv in make_normal_vectors(60):
+        det.score(fv)
+
+    assert det._is_fitted
+    assert det._pca is None
+
+
+def test_pca_scoring_gives_valid_results():
+    """PCA-enabled detector still produces valid 0-1 scores."""
+    cfg = DetectorConfig(
+        buffer_size=50,
+        refit_every=25,
+        n_estimators=20,
+        hysteresis_count=1,
+        enable_pca=True,
+        pca_components=10,
+    )
+    det = AnomalyDetector(cfg)
+    for fv in make_normal_vectors(55):
+        r = det.score(fv)
+
+    assert r.is_fitted
+    assert 0.0 <= r.anomaly_score <= 1.0
+
+
+def test_pca_status_fields():
+    """get_status() exposes PCA info after fitting."""
+    cfg = DetectorConfig(
+        buffer_size=50,
+        refit_every=25,
+        n_estimators=20,
+        enable_pca=True,
+        pca_components=15,
+        hysteresis_count=1,
+        enable_adaptive_threshold=False,
+    )
+    det = AnomalyDetector(cfg)
+
+    # Before fitting: pca_components == 0 (no PCA yet)
+    status = det.get_status()
+    assert status["pca_enabled"] is True
+    assert status["pca_components"] == 0
+
+    # After fitting: components reflect config
+    for fv in make_normal_vectors(55):
+        det.score(fv)
+    status = det.get_status()
+    assert status["pca_enabled"] is True
+    assert status["pca_components"] == 15
+
+
+# -------------------------------------------------------------------
+# Drift detection
+# -------------------------------------------------------------------
+
+def test_drift_metrics_keys():
+    """get_drift_metrics returns expected keys."""
+    cfg = DetectorConfig(
+        buffer_size=50,
+        refit_every=25,
+        n_estimators=20,
+        hysteresis_count=1,
+        enable_drift_detection=True,
+        enable_adaptive_threshold=False,
+    )
+    det = AnomalyDetector(cfg)
+    m = det.get_drift_metrics()
+    expected = {
+        "adaptive_threshold",
+        "score_mean",
+        "feature_mean_drift",
+        "refit_count",
+    }
+    assert set(m.keys()) == expected
+
+
+def test_refit_count_increments():
+    """refit_count grows each time the model refits."""
+    cfg = DetectorConfig(
+        buffer_size=30,
+        refit_every=30,
+        n_estimators=10,
+        hysteresis_count=1,
+        enable_drift_detection=True,
+        enable_adaptive_threshold=False,
+    )
+    det = AnomalyDetector(cfg)
+    for fv in make_normal_vectors(35):
+        det.score(fv)
+
+    assert det.get_drift_metrics()["refit_count"] >= 1
+
+
+def test_feature_drift_after_shift():
+    """Feature mean drift should increase after distribution shift."""
+    cfg = DetectorConfig(
+        buffer_size=30,
+        refit_every=30,
+        n_estimators=10,
+        hysteresis_count=1,
+        enable_drift_detection=True,
+        enable_adaptive_threshold=False,
+    )
+    det = AnomalyDetector(cfg)
+
+    # Phase 1: fit on normal
+    for fv in make_normal_vectors(35, seed=0):
+        det.score(fv)
+
+    drift_1 = det.get_drift_metrics()["feature_mean_drift"]
+
+    # Phase 2: feed shifted distribution to trigger refit
+    rng = np.random.default_rng(42)
+    shifted = [
+        rng.normal(5.0, 0.5, size=_DIM).astype(np.float32)
+        for _ in range(35)
+    ]
+    for fv in shifted:
+        det.score(fv)
+
+    drift_2 = det.get_drift_metrics()["feature_mean_drift"]
+    assert drift_2 > drift_1
+
+
+def test_pca_save_load_state(tmp_path):
+    """PCA state survives save/load cycle."""
+    cfg = DetectorConfig(
+        buffer_size=50,
+        refit_every=25,
+        n_estimators=20,
+        hysteresis_count=1,
+        enable_pca=True,
+        pca_components=10,
+        enable_adaptive_threshold=False,
+    )
+    det = AnomalyDetector(cfg)
+    for fv in make_normal_vectors(55):
+        det.score(fv)
+
+    assert det._pca is not None
+    save_file = tmp_path / "state.pkl"
+    det.save_state(str(save_file))
+
+    det2 = AnomalyDetector(cfg)
+    det2.load_state(str(save_file))
+    assert det2._pca is not None
+    assert det2._refit_count == det._refit_count
+
+
+def test_reset_clears_drift_state():
+    """reset() should zero out all drift tracking."""
+    cfg = DetectorConfig(
+        buffer_size=30,
+        refit_every=30,
+        n_estimators=10,
+        hysteresis_count=1,
+        enable_pca=True,
+        pca_components=5,
+        enable_drift_detection=True,
+        enable_adaptive_threshold=False,
+    )
+    det = AnomalyDetector(cfg)
+    for fv in make_normal_vectors(35):
+        det.score(fv)
+
+    det.reset()
+    m = det.get_drift_metrics()
+    assert m["refit_count"] == 0
+    assert m["feature_mean_drift"] == 0.0
+    assert det._pca is None

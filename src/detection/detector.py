@@ -6,6 +6,7 @@ from collections import deque
 from typing import Optional
 
 import numpy as np
+from sklearn.decomposition import PCA
 from sklearn.ensemble import IsolationForest
 
 from .config import DetectorConfig
@@ -97,6 +98,21 @@ class AnomalyDetector:
         self._recent_scores: deque[float] = deque(
             maxlen=self._config.adaptive_score_window
         )
+        # Mirror buffer of normalised [0,1] scores for
+        # visual threshold (percentile 98 of norm scores).
+        self._recent_norm_scores: deque[float] = deque(
+            maxlen=self._config.adaptive_score_window
+        )
+
+        # PCA — fitted alongside the IF model
+        self._pca: Optional[PCA] = None
+
+        # Drift detection state
+        self._refit_count: int = 0
+        self._prev_feature_mean: Optional[np.ndarray] = None
+        self._feature_mean_drift: float = 0.0
+        self._adaptive_threshold: float = 0.0
+        self._score_mean: float = 0.0
 
     # ------------------------------------------------------------------ #
     #  Core API                                                           #
@@ -149,10 +165,20 @@ class AnomalyDetector:
                     feature_vector=fv,
                 )
 
+            # PCA transform for scoring (if enabled)
+            fv_score = fv_norm
+            if self._config.enable_pca and self._pca is not None:
+                fv_score = self._pca.transform(
+                    fv_norm.reshape(1, -1)
+                )[0].astype(np.float32)
+
             raw = float(
-                self._model.score_samples([fv_norm])[0]
+                self._model.score_samples([fv_score])[0]
             )
             anomaly_score = self._normalize_score(raw)
+
+            # Keep normalised scores for visual threshold
+            self._recent_norm_scores.append(anomaly_score)
 
             # --- Adaptive threshold (3.5) ------------------
             self._recent_scores.append(raw)
@@ -168,8 +194,18 @@ class AnomalyDetector:
                     )
                 )
                 is_raw_anomaly = raw < adaptive_thresh
+                self._adaptive_threshold = adaptive_thresh
             else:
                 is_raw_anomaly = raw < self._model.offset_
+                self._adaptive_threshold = float(
+                    self._model.offset_
+                )
+
+            # Drift: running mean of recent scores
+            if self._recent_scores:
+                self._score_mean = float(
+                    np.mean(list(self._recent_scores))
+                )
 
             # --- EMA smoothing + hysteresis (2.4) ----------
             alpha = self._config.ema_alpha
@@ -212,6 +248,48 @@ class AnomalyDetector:
                 "samples_since_refit": self._samples_since_refit,
                 "smoothed_score": self._smoothed_score,
                 "consecutive_anomalies": self._consecutive_anomalies,
+                "pca_enabled": self._config.enable_pca,
+                "pca_components": (
+                    self._pca.n_components_
+                    if self._pca is not None
+                    else 0
+                ),
+            }
+
+    def get_drift_metrics(self) -> dict:
+        """Return current drift detection metrics.
+
+        Thread-safe snapshot of metrics that describe how
+        the detector's operating environment is evolving.
+        The adaptive_threshold is the 98th percentile of
+        recent normalised scores, matching the chart scale.
+        """
+        with self._lock:
+            # Visual threshold: p98 of normalised scores
+            if (
+                self._is_fitted
+                and len(self._recent_norm_scores)
+                >= self._config.buffer_size
+            ):
+                norm_thresh = float(np.percentile(
+                    list(self._recent_norm_scores),
+                    100.0
+                    - self._config.adaptive_percentile,
+                ))
+            else:
+                norm_thresh = 0.5  # sensible default
+
+            return {
+                "adaptive_threshold": round(
+                    norm_thresh, 6,
+                ),
+                "score_mean": round(
+                    self._score_mean, 6,
+                ),
+                "feature_mean_drift": round(
+                    self._feature_mean_drift, 6,
+                ),
+                "refit_count": self._refit_count,
             }
 
     def reset(self) -> None:
@@ -219,12 +297,19 @@ class AnomalyDetector:
         with self._lock:
             self._buffer.clear()
             self._model = None
+            self._pca = None
             self._is_fitted = False
             self._samples_since_refit = 0
             self._smoothed_score = 0.0
             self._consecutive_anomalies = 0
             self._recent_scores.clear()
+            self._recent_norm_scores.clear()
             self._normalizer = None
+            self._refit_count = 0
+            self._prev_feature_mean = None
+            self._feature_mean_drift = 0.0
+            self._adaptive_threshold = 0.0
+            self._score_mean = 0.0
 
     # ------------------------------------------------------------------ #
     #  Persistent baseline (3.4)                                          #
@@ -236,6 +321,7 @@ class AnomalyDetector:
         with self._lock:
             state = {
                 "model": self._model,
+                "pca": self._pca,
                 "is_fitted": self._is_fitted,
                 "buffer": list(self._buffer),
                 "score_min": self._score_min,
@@ -247,6 +333,8 @@ class AnomalyDetector:
                     else None
                 ),
                 "recent_scores": list(self._recent_scores),
+                "refit_count": self._refit_count,
+                "prev_feature_mean": self._prev_feature_mean,
             }
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "wb") as f:
@@ -272,6 +360,13 @@ class AnomalyDetector:
                 self._smoothed_score = state.get(
                     "smoothed_score", 0.0
                 )
+                self._pca = state.get("pca")
+                self._refit_count = state.get(
+                    "refit_count", 0
+                )
+                self._prev_feature_mean = state.get(
+                    "prev_feature_mean"
+                )
                 norm_state = state.get("normalizer")
                 if norm_state is not None:
                     dim = len(norm_state["mean"])
@@ -290,16 +385,41 @@ class AnomalyDetector:
     def _fit(self) -> None:
         # Caller must hold self._lock
         X = np.array(list(self._buffer), dtype=np.float32)
+
+        # Drift: compute feature-mean shift vs previous fit
+        current_mean = X.mean(axis=0)
+        if (
+            self._config.enable_drift_detection
+            and self._prev_feature_mean is not None
+        ):
+            self._feature_mean_drift = float(
+                np.linalg.norm(
+                    current_mean - self._prev_feature_mean
+                )
+            )
+        self._prev_feature_mean = current_mean
+
+        # PCA: fit on the buffer, then transform
+        if self._config.enable_pca:
+            n_comp = min(
+                self._config.pca_components, X.shape[1],
+            )
+            self._pca = PCA(n_components=n_comp)
+            X_reduced = self._pca.fit_transform(X)
+        else:
+            X_reduced = X
+
         self._model = IsolationForest(
             n_estimators=self._config.n_estimators,
             contamination=self._config.contamination,
             max_samples=self._config.max_samples,
             random_state=self._config.random_state,
         )
-        self._model.fit(X)
-        scores = self._model.score_samples(X)
+        self._model.fit(X_reduced)
+        scores = self._model.score_samples(X_reduced)
         self._score_min = float(scores.min())
         self._score_max = float(scores.max())
+        self._refit_count += 1
 
     def _normalize_score(self, raw_score: float) -> float:
         denom = self._score_max - self._score_min

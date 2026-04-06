@@ -247,3 +247,44 @@ def test_reset_detector_calls_correct_url():
         client.reset_detector()
 
     assert "http://testserver/internal/reset-detector" in mock_post.call_args[0][0]
+
+
+# -------------------------------------------------------------------
+# Live monitor chart helpers
+# -------------------------------------------------------------------
+
+def test_score_chart_without_threshold():
+    """_score_chart renders with static hline when no threshold."""
+    from src.dashboard.pages.live_monitor import _score_chart
+    fig = _score_chart([0.1, 0.5, 0.3], False)
+    assert fig is not None
+    assert len(fig.data) == 1  # only score trace
+
+
+def test_score_chart_with_threshold():
+    """_score_chart overlays adaptive threshold when provided."""
+    from src.dashboard.pages.live_monitor import _score_chart
+    fig = _score_chart(
+        [0.1, 0.5, 0.3], True,
+        thresh_history=[0.4, 0.45, 0.42],
+    )
+    assert fig is not None
+    assert len(fig.data) == 2  # score + threshold
+
+
+def test_score_kde_chart_with_data():
+    """_score_kde_chart shows KDE + threshold with enough data."""
+    from src.dashboard.pages.live_monitor import _score_kde_chart
+    scores = [0.1, 0.2, 0.15, 0.3, 0.25, 0.4, 0.35]
+    fig = _score_kde_chart(scores, threshold=0.5)
+    assert fig is not None
+    assert len(fig.data) == 2  # KDE trace + threshold line
+
+
+def test_score_kde_chart_empty():
+    """_score_kde_chart handles all-zero / sparse data."""
+    from src.dashboard.pages.live_monitor import _score_kde_chart
+    fig = _score_kde_chart([0.0, 0.0, 0.0], threshold=0.5)
+    assert fig is not None
+    # Only threshold line (no KDE when data is constant)
+    assert len(fig.data) == 1

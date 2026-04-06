@@ -35,3 +35,10 @@ class DetectorConfig:
 
     # -- Persistent baseline (3.4) ---------------------------------------------
     state_path: str = "data/detector_state.pkl"
+
+    # -- PCA dimensionality reduction ---------------------------------------
+    enable_pca: bool = True
+    pca_components: int = 25  # 99% variance in ~9; 25 adds safety margin
+
+    # -- Drift detection ----------------------------------------------------
+    enable_drift_detection: bool = True

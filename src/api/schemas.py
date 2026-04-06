@@ -31,7 +31,13 @@ class AnomalyScoreMessage(BaseModel):
     timestamp: str        # ISO format
     window_index: int
     bounding_boxes: list[dict]
-    motion_energy: float = 0.0  # normalised motion area ratio [0,1]
+    motion_energy: float = 0.0  # motion area ratio [0,1]
+    rms: float = 0.0  # RMS amplitude of the audio window
+    # Drift detection metrics
+    adaptive_threshold: float = 0.0
+    score_mean: float = 0.0
+    feature_mean_drift: float = 0.0
+    refit_count: int = 0
 
 
 class OfflineAnalysisResponse(BaseModel):
