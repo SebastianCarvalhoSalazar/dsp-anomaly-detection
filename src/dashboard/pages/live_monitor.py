@@ -343,29 +343,48 @@ def render(client: APIClient) -> None:
       Fusión multimodal
     </div>
     """)
-    ctrl, _ = st.columns([2, 1], gap="large")
-    with ctrl:
-        cc1, cc2 = st.columns(2)
-        strategy_name = cc1.selectbox(
-            "Estrategia de fusión",
-            options=["weighted", "max", "and", "or"],
-            format_func=lambda s: {
-                "weighted": "Weighted Average",
-                "max": "Maximum",
-                "and": "AND",
-                "or": "OR",
-            }[s],
-            key="fusion_strategy",
-        )
-        audio_weight = cc2.slider(
-            "Audio weight",
-            min_value=0.0, max_value=1.0, value=0.5, step=0.05,
-            key="audio_weight",
-            help="Video weight = 1 − audio weight",
-        )
+    cc1, cc2, cc3 = st.columns([2, 2, 2])
+    strategy_name = cc1.selectbox(
+        "Estrategia de fusión",
+        options=["weighted", "max", "and", "or"],
+        format_func=lambda s: {
+            "weighted": "Weighted Average",
+            "max": "Maximum",
+            "and": "AND",
+            "or": "OR",
+        }[s],
+        key="fusion_strategy",
+    )
+    audio_weight = cc2.slider(
+        "Audio weight",
+        min_value=0.0, max_value=1.0, value=0.5, step=0.05,
+        key="audio_weight",
+        help="Video weight = 1 − audio weight",
+    )
+    gates = cc3.toggle(
+        "Fusión decide anomalías",
+        value=False,
+        key="fusion_gates",
+        help="Si está activo, el combined_score decide el gating en el pipeline "
+             "(en vez de solo audio).",
+    )
 
-    # Recompute the fused score client-side from the calibrated per-modality
-    # scores received over the WebSocket (no round-trip to the pipeline).
+    # Push the selection to the pipeline whenever it changes — these controls
+    # now govern the live pipeline, not just this view.
+    desired = {
+        "strategy": strategy_name,
+        "audio_weight": float(audio_weight),
+        "gates": bool(gates),
+    }
+    if st.session_state.get("_fusion_sent") != desired:
+        try:
+            client.set_fusion_config(**desired)
+            st.session_state._fusion_sent = desired
+            st.caption("⚙️ Configuración de fusión aplicada al pipeline.")
+        except Exception as exc:  # noqa: BLE001
+            st.caption(f"⚠️ No se pudo aplicar al pipeline: {exc}")
+
+    # Mirror the pipeline's fusion locally for instant visual feedback.
     kwargs = {"audio_weight": audio_weight} if strategy_name == "weighted" else {}
     fusion_result = make_strategy(strategy_name, **kwargs).combine(
         audio_score, video_score

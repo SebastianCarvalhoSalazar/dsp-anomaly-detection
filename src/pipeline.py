@@ -30,7 +30,7 @@ import sounddevice as sd
 from src.detection import AnomalyDetector, DetectorConfig, SnapshotStore
 from src.dsp import AudioProcessor, DSPConfig
 from src.embeddings import MultimodalEncoder
-from src.fusion import PercentileCalibrator, WeightedAverage
+from src.fusion import PercentileCalibrator, WeightedAverage, make_strategy
 from src.storage import Database, EventStore, FAISSStore, StorageConfig
 from src.storage.models import AnomalyEvent
 from src.sync import FrameRingBuffer
@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 _API_BASE = os.getenv("API_BASE_URL", "http://localhost:8000")
 API_INTERNAL_URL = _API_BASE + "/internal/score"
 API_RESET_PENDING_URL = _API_BASE + "/internal/reset-pending"
+API_FUSION_CONFIG_URL = _API_BASE + "/internal/fusion-config"
 
 
 class Pipeline:
@@ -103,6 +104,12 @@ class Pipeline:
         self._fusion_gates = os.getenv(
             "FUSION_GATES_DECISION", "false"
         ).lower() in ("1", "true", "yes")
+        # Snapshot of the live fusion config (driven from the dashboard).
+        self._fusion_config_current = {
+            "strategy": "weighted",
+            "audio_weight": 0.5,
+            "gates": self._fusion_gates,
+        }
 
         # Dual horizon (Req 6): an optional "slow" model per modality with a
         # large buffer reflects long-term behaviour. The final decision still
@@ -225,6 +232,49 @@ class Pipeline:
         except Exception as exc:
             logger.debug("Reset poll failed (API may not be running): %s", exc)
 
+    def _apply_fusion_config(self, cfg: dict) -> None:
+        """Apply a fusion config (from the dashboard) to the live pipeline.
+
+        Rebuilds the fusion strategy and updates the gating mode. Unknown
+        strategy names are ignored (the current strategy is kept).
+        """
+        name = cfg.get("strategy", "weighted")
+        audio_weight = float(cfg.get("audio_weight", 0.5))
+        gates = bool(cfg.get("gates", False))
+        kwargs = {"audio_weight": audio_weight} if name == "weighted" else {}
+        try:
+            self.fusion_strategy = make_strategy(name, **kwargs)
+        except ValueError:
+            logger.warning("Ignoring unknown fusion strategy: %s", name)
+            return
+        self._fusion_gates = gates
+        self._fusion_config_current = {
+            "strategy": name, "audio_weight": audio_weight, "gates": gates,
+        }
+        logger.info(
+            "Fusion config updated: strategy=%s audio_weight=%.2f gates=%s",
+            name, audio_weight, gates,
+        )
+
+    def _check_fusion_config(self) -> None:
+        """Poll the API for the dashboard-driven fusion config and apply it
+        when it changed."""
+        try:
+            resp = httpx.get(API_FUSION_CONFIG_URL, timeout=0.5)
+            if resp.status_code != 200:
+                return
+            cfg = resp.json()
+        except Exception as exc:
+            logger.debug("Fusion-config poll failed: %s", exc)
+            return
+        normalized = {
+            "strategy": cfg.get("strategy", "weighted"),
+            "audio_weight": float(cfg.get("audio_weight", 0.5)),
+            "gates": bool(cfg.get("gates", False)),
+        }
+        if normalized != self._fusion_config_current:
+            self._apply_fusion_config(normalized)
+
     def _process_loop(self) -> None:
         """Consume audio windows, score them, and handle anomalies."""
         _reset_check_interval = 50  # check for reset every N windows
@@ -243,6 +293,7 @@ class Pipeline:
             _window_count += 1
             if _window_count % _reset_check_interval == 0:
                 self._check_reset()
+                self._check_fusion_config()
 
             # Accumulate raw samples for pre-event context before scoring
             self._pre_audio_buffer.extend(window.tolist())

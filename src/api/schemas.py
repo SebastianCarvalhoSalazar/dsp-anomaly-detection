@@ -60,6 +60,16 @@ class AnomalyScoreMessage(BaseModel):
     dominant_modality: str = "audio"
 
 
+class FusionConfigMessage(BaseModel):
+    """Live fusion configuration driven from the dashboard and polled by the
+    pipeline. ``strategy`` is one of weighted|max|and|or; ``gates`` toggles
+    whether the fused score drives the event-gating decision."""
+
+    strategy: str = "weighted"
+    audio_weight: float = 0.5
+    gates: bool = False
+
+
 class OfflineAnalysisResponse(BaseModel):
     imfs: list[list[float]]          # list of IMF arrays (time series)
     n_imfs: int
