@@ -440,6 +440,7 @@ def test_drift_metrics_keys():
         "drift_auc",
         "top_drift_features",
         "refit_count",
+        "refit_reason",
     }
     assert set(m.keys()) == expected
 

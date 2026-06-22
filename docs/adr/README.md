@@ -19,10 +19,10 @@ fusión tardía** (audio + video) descrita en el plan
 | [0004](0004-score-calibration-historical-percentiles.md) | Calibración de scores por percentiles históricos | Aceptado | 2 |
 | [0005](0005-configurable-fusion-strategies.md) | Estrategias de fusión configurables (patrón Strategy) | Aceptado | 2 |
 | [0006](0006-no-pca-for-low-dim-video-features.md) | Sin PCA para features de video de baja dimensión | Aceptado | 2 |
-| 0007 | Doble horizonte temporal (modelo rápido / lento) | Planeado | 3 |
-| 0008 | Política de refit sensible a drift | Planeado | 3 |
-| 0009 | Snapshots de modelos y retención | Planeado | 3 |
-| 0010 | Explicabilidad por z-score vs baseline reciente | Planeado | 3 |
+| [0007](0007-dual-horizon-fast-slow-models.md) | Doble horizonte temporal (modelo rápido / lento) | Aceptado | 3 |
+| [0008](0008-drift-aware-adaptive-refit-policy.md) | Política de refit sensible a drift | Aceptado | 3 |
+| [0009](0009-model-snapshots-and-retention.md) | Snapshots de modelos y retención | Aceptado | 3 |
+| [0010](0010-explainability-via-zscore-baseline.md) | Explicabilidad por z-score vs baseline reciente | Aceptado | 3 |
 | [0011](0011-backward-compatible-event-schema-migration.md) | Migración de esquema de eventos compatible hacia atrás | Aceptado | 1 |
 
 ## Convenciones

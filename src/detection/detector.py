@@ -13,8 +13,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .base import BaseAnomalyDetector, _WelfordNormalizer  # noqa: F401
+from .base import BaseAnomalyDetector
 from .config import DetectorConfig
+from .snapshots import SnapshotStore
 
 
 class AnomalyDetector(BaseAnomalyDetector):
@@ -36,5 +37,10 @@ class AnomalyDetector(BaseAnomalyDetector):
         self,
         config: DetectorConfig | None = None,
         feature_names: Optional[list[str]] = None,
+        snapshot_store: Optional[SnapshotStore] = None,
     ) -> None:
-        super().__init__(config=config, feature_names=feature_names)
+        super().__init__(
+            config=config,
+            feature_names=feature_names,
+            snapshot_store=snapshot_store,
+        )

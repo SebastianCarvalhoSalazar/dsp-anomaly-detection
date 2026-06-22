@@ -44,6 +44,7 @@ class AnomalyScoreMessage(BaseModel):
     drift_auc: float = 0.5
     top_drift_features: list[str] = []
     refit_count: int = 0
+    refit_reason: str = "scheduled"
     # -- Multimodal scores (v0.3) ------------------------------------------
     # Defaults keep older dashboard clients working. In single-modality
     # operation audio_score == combined_score == anomaly_score.

@@ -387,6 +387,24 @@ def render(client: APIClient) -> None:
             f"{1 - audio_weight:.2f}·video"
         )
 
+    # Dual horizon (fast / slow) per modality.
+    hz1, hz2, hz3, hz4 = st.columns(4)
+    hz1.metric("Audio rápido", f"{msg.get('fast_audio_score', 0.0):.3f}" if msg else "—")
+    hz2.metric("Audio lento", f"{msg.get('slow_audio_score', 0.0):.3f}" if msg else "—")
+    hz3.metric("Video rápido", f"{msg.get('fast_video_score', 0.0):.3f}" if msg else "—")
+    hz4.metric("Video lento", f"{msg.get('slow_video_score', 0.0):.3f}" if msg else "—")
+
+    # Explainability: top contributing features (z-score vs baseline).
+    top_audio = msg.get("top_audio_features", []) if msg else []
+    top_video = msg.get("top_video_features", []) if msg else []
+    if top_audio or top_video:
+        parts = []
+        if top_audio:
+            parts.append("🔊 " + ", ".join(top_audio))
+        if top_video:
+            parts.append("🎥 " + ", ".join(top_video))
+        st.caption("Top contributors — " + "  ·  ".join(parts))
+
     st.divider()
 
     # ── Score history ────────────────────────────────────────────────────────

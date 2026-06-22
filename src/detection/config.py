@@ -58,6 +58,16 @@ class DetectorConfig:
 
     # -- Drift detection (C2ST) -----------------------------------------------
     enable_drift_detection: bool = True
-    # Number of trees in the HistGradientBoosting classifier
-    # used for the Classifier Two-Sample Test (C2ST).
+    # Number of trees in the RandomForest classifier used for the
+    # Classifier Two-Sample Test (C2ST).
     c2st_n_estimators: int = 50
+
+    # -- Drift-aware refits (Req 7) -------------------------------------------
+    # When drift_auc exceeds the threshold, shorten the refit interval so the
+    # model adapts faster to a changing environment. Off by default to
+    # preserve the fixed-interval behaviour; the pipeline enables it.
+    enable_drift_aware_refit: bool = False
+    drift_refit_threshold: float = 0.8
+    # Effective interval under drift = refit_every * factor (clamped below).
+    drift_refit_factor: float = 0.5
+    min_refit_interval: int = 50

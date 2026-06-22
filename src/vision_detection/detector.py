@@ -18,6 +18,7 @@ from typing import Optional
 
 from src.detection import DetectorConfig
 from src.detection.base import BaseAnomalyDetector
+from src.detection.snapshots import SnapshotStore
 
 from .types import VIDEO_FEATURE_NAMES
 
@@ -38,8 +39,13 @@ def default_video_config() -> DetectorConfig:
 class VideoAnomalyDetector(BaseAnomalyDetector):
     """Online motion-based anomaly detector (IsolationForest, no PCA)."""
 
-    def __init__(self, config: Optional[DetectorConfig] = None) -> None:
+    def __init__(
+        self,
+        config: Optional[DetectorConfig] = None,
+        snapshot_store: Optional[SnapshotStore] = None,
+    ) -> None:
         super().__init__(
             config=config or default_video_config(),
             feature_names=list(VIDEO_FEATURE_NAMES),
+            snapshot_store=snapshot_store,
         )

@@ -28,6 +28,7 @@ Design notes (fixes from the v0.2.0 review):
 
 from __future__ import annotations
 
+import logging
 import os
 import pickle
 import threading
@@ -41,7 +42,10 @@ from sklearn.ensemble import IsolationForest, RandomForestClassifier
 from sklearn.model_selection import cross_val_score
 
 from .config import DetectorConfig
+from .snapshots import SnapshotStore
 from .types import AnomalyResult
+
+logger = logging.getLogger(__name__)
 
 
 class _WelfordNormalizer:
@@ -72,6 +76,15 @@ class _WelfordNormalizer:
         std = np.sqrt(var + 1e-8)
         return ((x.astype(np.float64) - self._mean) / std).astype(np.float32)
 
+    @property
+    def is_ready(self) -> bool:
+        return self._n >= self._min_samples
+
+    def mean_std(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return (mean, std) of the running statistics."""
+        std = np.sqrt(self._m2 / self._n + 1e-8)
+        return self._mean.copy(), std
+
     def get_state(self) -> dict:
         return {
             "n": self._n,
@@ -100,9 +113,11 @@ class BaseAnomalyDetector:
         self,
         config: DetectorConfig | None = None,
         feature_names: Optional[list[str]] = None,
+        snapshot_store: Optional[SnapshotStore] = None,
     ) -> None:
         self._config = config or DetectorConfig()
         self._feature_names = feature_names
+        self._snapshot_store = snapshot_store
         self._buffer: deque[np.ndarray] = deque(maxlen=self._config.buffer_size)
         self._model: IsolationForest | None = None
         self._is_fitted = False
@@ -141,6 +156,9 @@ class BaseAnomalyDetector:
         self._top_drift_features: list[str] = []
         self._adaptive_threshold: float = 0.0
         self._score_mean: float = 0.0
+        # Why the last fit happened: "scheduled" | "drift" | "initial" (Req 7)
+        self._refit_reason: str = "scheduled"
+        self._pending_refit_reason: str = "scheduled"
 
     # ------------------------------------------------------------------ #
     #  Core API                                                           #
@@ -193,16 +211,30 @@ class BaseAnomalyDetector:
                 need_fit = True
                 is_initial = True
                 self._fitting = True
+                self._pending_refit_reason = "initial"
                 fit_X = np.array(list(self._buffer), dtype=np.float32)
                 fit_prev = self._prev_buffer
             elif self._is_fitted:
                 self._samples_since_refit += 1
+                # Drift-aware: shorten the interval when drift is high (Req 7).
+                interval = self._config.refit_every
+                reason = "scheduled"
                 if (
-                    self._samples_since_refit >= self._config.refit_every
+                    self._config.enable_drift_aware_refit
+                    and self._drift_auc >= self._config.drift_refit_threshold
+                ):
+                    interval = max(
+                        self._config.min_refit_interval,
+                        int(interval * self._config.drift_refit_factor),
+                    )
+                    reason = "drift"
+                if (
+                    self._samples_since_refit >= interval
                     and not self._fitting
                 ):
                     need_fit = True
                     self._fitting = True
+                    self._pending_refit_reason = reason
                     self._samples_since_refit = 0
                     fit_X = np.array(list(self._buffer), dtype=np.float32)
                     fit_prev = self._prev_buffer
@@ -216,6 +248,8 @@ class BaseAnomalyDetector:
                     self._is_fitted = True
                     self._samples_since_refit = 0
                 self._fitting = False
+            # Persist a snapshot off the hot-path (Req 8).
+            self._save_snapshot(fit_result, fit_X)
 
         # --- Phase C: under lock — score with current model ------------- #
         with self._lock:
@@ -341,6 +375,7 @@ class BaseAnomalyDetector:
                 "drift_auc": round(self._drift_auc, 4),
                 "top_drift_features": self._top_drift_features.copy(),
                 "refit_count": self._refit_count,
+                "refit_reason": self._refit_reason,
             }
 
     def reset(self) -> None:
@@ -368,6 +403,8 @@ class BaseAnomalyDetector:
         self._top_drift_features = []
         self._adaptive_threshold = 0.0
         self._score_mean = 0.0
+        self._refit_reason = "scheduled"
+        self._pending_refit_reason = "scheduled"
 
     # ------------------------------------------------------------------ #
     #  Persistent baseline                                                #
@@ -399,6 +436,7 @@ class BaseAnomalyDetector:
                 "top_drift_features": list(self._top_drift_features),
                 "score_mean": self._score_mean,
                 "adaptive_threshold": self._adaptive_threshold,
+                "refit_reason": self._refit_reason,
             }
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "wb") as f:
@@ -435,6 +473,7 @@ class BaseAnomalyDetector:
                 )
                 self._score_mean = state.get("score_mean", 0.0)
                 self._adaptive_threshold = state.get("adaptive_threshold", 0.0)
+                self._refit_reason = state.get("refit_reason", "scheduled")
                 norm_state = state.get("normalizer")
                 if norm_state is not None:
                     dim = len(norm_state["mean"])
@@ -582,7 +621,48 @@ class BaseAnomalyDetector:
         self._drift_auc = fit["drift_auc"]
         self._top_drift_features = fit["top_drift_features"]
         self._prev_buffer = fit["prev_buffer"]
+        self._refit_reason = self._pending_refit_reason
         self._refit_count += 1
+
+    def _save_snapshot(self, fit: dict, fit_X: np.ndarray) -> None:
+        """Persist a model snapshot (Req 8). Best-effort, off the hot-path."""
+        if self._snapshot_store is None:
+            return
+        try:
+            metadata = {
+                "timestamp": time.time(),
+                "refit_count": self._refit_count,
+                "refit_reason": self._refit_reason,
+                "drift_auc": round(self._drift_auc, 4),
+                "n_samples": int(fit_X.shape[0]),
+                "buffer_mean": float(np.mean(fit_X)),
+                "buffer_std": float(np.std(fit_X)),
+            }
+            self._snapshot_store.save(
+                model=fit["model"], pca=fit["pca"], metadata=metadata
+            )
+        except Exception as exc:  # pragma: no cover - best effort
+            logger.debug("Snapshot save failed: %s", exc)
+
+    def top_features(self, feature_vector: np.ndarray, k: int = 3) -> list[str]:
+        """Top-k features by absolute z-score vs the recent baseline (Req 9).
+
+        Explains *why* a window looks anomalous in terms of the named features,
+        e.g. ``["spectral_centroid +4.2σ", "wavelet_band_4 +3.1σ"]``. Returns an
+        empty list during warmup (insufficient baseline statistics).
+        """
+        fv = np.asarray(feature_vector, dtype=np.float64)
+        with self._lock:
+            norm = self._normalizer
+            if norm is None or not norm.is_ready:
+                return []
+            mean, std = norm.mean_std()
+            names = self._resolve_feature_names(fv.shape[0])
+        if fv.shape[0] != mean.shape[0]:
+            return []
+        z = (fv - mean) / std
+        order = np.argsort(np.abs(z))[::-1][:k]
+        return [f"{names[i]} {z[i]:+.1f}σ" for i in order]
 
     def _normalize_score(self, raw_score: float) -> float:
         denom = self._score_max - self._score_min
