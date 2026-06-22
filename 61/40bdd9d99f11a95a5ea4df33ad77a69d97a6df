@@ -1,0 +1,22 @@
+src/dashboard/pages/live_monitor.py
+  s_82d54c3d01e175::t_f564d6f7cd47df 35-77
+  s_82d54c3d01e175::t_9306364c442f7e 389-391,406,417-418
+tests/test_dashboard.py
+  s_82d54c3d01e175::t_4b018a09f3e890 281-326
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "6140bdd9d99f11a95a5ea4df33ad77a69d97a6df",
+  "prompts": {},
+  "sessions": {
+    "s_82d54c3d01e175": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6c2db251-c75e-47a9-9c9b-429f1fc63f54",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Sebastian Carvalho <sebastian.carvalho@mercadolibre.com.co>"
+    }
+  }
+}
