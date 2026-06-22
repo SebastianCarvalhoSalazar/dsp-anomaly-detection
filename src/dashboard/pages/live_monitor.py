@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import threading
 import time
@@ -20,8 +21,15 @@ from src.dashboard.styles import (
     page_header,
     status_chip,
 )
+from src.fusion import make_strategy
 
-_WS_URL  = "ws://localhost:8000/ws/stream"
+# M15: honour API_BASE_URL instead of hardcoding localhost, so the live
+# monitor works wherever the API is deployed.
+_API_BASE = os.getenv("API_BASE_URL", "http://localhost:8000")
+_WS_URL = (
+    _API_BASE.replace("https://", "wss://").replace("http://", "ws://")
+    + "/ws/stream"
+)
 _HISTORY = 256
 
 
@@ -250,7 +258,8 @@ def render(client: APIClient) -> None:
             break
 
     msg        = st.session_state.latest_msg
-    score      = msg["anomaly_score"]  if msg else 0.0
+    # M14: never index a possibly-partial payload directly.
+    score      = msg.get("anomaly_score", 0.0) if msg else 0.0
     is_anomaly = msg.get("is_anomaly", False) if msg else False
     is_fitted  = msg.get("is_fitted",  False) if msg else False
     win_idx    = msg.get("window_index", 0)   if msg else 0
@@ -323,6 +332,78 @@ def render(client: APIClient) -> None:
                 st.toast("Señal de reset enviada al pipeline.")
             except Exception as exc:
                 st.error(f"Error: {exc}")
+
+    # ── Multimodal fusion ─────────────────────────────────────────────────────
+    audio_score = msg.get("audio_score", 0.0) if msg else 0.0
+    video_score = msg.get("video_score", 0.0) if msg else 0.0
+
+    st.html(f"""
+    <div style="font-size:0.78rem;font-weight:600;letter-spacing:0.06em;
+         text-transform:uppercase;color:{PALETTE['muted']};margin:0.5rem 0 0.25rem;">
+      Fusión multimodal
+    </div>
+    """)
+    ctrl, _ = st.columns([2, 1], gap="large")
+    with ctrl:
+        cc1, cc2 = st.columns(2)
+        strategy_name = cc1.selectbox(
+            "Estrategia de fusión",
+            options=["weighted", "max", "and", "or"],
+            format_func=lambda s: {
+                "weighted": "Weighted Average",
+                "max": "Maximum",
+                "and": "AND",
+                "or": "OR",
+            }[s],
+            key="fusion_strategy",
+        )
+        audio_weight = cc2.slider(
+            "Audio weight",
+            min_value=0.0, max_value=1.0, value=0.5, step=0.05,
+            key="audio_weight",
+            help="Video weight = 1 − audio weight",
+        )
+
+    # Recompute the fused score client-side from the calibrated per-modality
+    # scores received over the WebSocket (no round-trip to the pipeline).
+    kwargs = {"audio_weight": audio_weight} if strategy_name == "weighted" else {}
+    fusion_result = make_strategy(strategy_name, **kwargs).combine(
+        audio_score, video_score
+    )
+
+    fm1, fm2, fm3, fm4 = st.columns(4)
+    fm1.metric("Audio score", f"{audio_score:.3f}")
+    fm2.metric("Video score", f"{video_score:.3f}")
+    fm3.metric("Combined score", f"{fusion_result.combined_score:.3f}")
+    _dom_label = {
+        "audio-driven": "Audio-driven",
+        "video-driven": "Video-driven",
+        "multimodal": "Multimodal",
+    }.get(fusion_result.dominant_modality, "—")
+    fm4.metric("Modalidad dominante", _dom_label)
+    if strategy_name == "weighted":
+        st.caption(
+            f"Combined = {audio_weight:.2f}·audio + "
+            f"{1 - audio_weight:.2f}·video"
+        )
+
+    # Dual horizon (fast / slow) per modality.
+    hz1, hz2, hz3, hz4 = st.columns(4)
+    hz1.metric("Audio rápido", f"{msg.get('fast_audio_score', 0.0):.3f}" if msg else "—")
+    hz2.metric("Audio lento", f"{msg.get('slow_audio_score', 0.0):.3f}" if msg else "—")
+    hz3.metric("Video rápido", f"{msg.get('fast_video_score', 0.0):.3f}" if msg else "—")
+    hz4.metric("Video lento", f"{msg.get('slow_video_score', 0.0):.3f}" if msg else "—")
+
+    # Explainability: top contributing features (z-score vs baseline).
+    top_audio = msg.get("top_audio_features", []) if msg else []
+    top_video = msg.get("top_video_features", []) if msg else []
+    if top_audio or top_video:
+        parts = []
+        if top_audio:
+            parts.append("🔊 " + ", ".join(top_audio))
+        if top_video:
+            parts.append("🎥 " + ", ".join(top_video))
+        st.caption("Top contributors — " + "  ·  ".join(parts))
 
     st.divider()
 

@@ -23,3 +23,19 @@ class AnomalyEvent(Base):
     source_region_json = Column(Text, nullable=True)
     # Extra metadata: window_index, feature norms, etc.
     extra_json = Column(Text, nullable=True)
+
+    # -- Multimodal scores (v0.3) ------------------------------------------
+    # All nullable for backward compatibility with events written by older
+    # versions; populated as each modality/fusion stage comes online.
+    audio_score = Column(Float, nullable=True)
+    video_score = Column(Float, nullable=True)
+    combined_score = Column(Float, nullable=True)
+    fast_audio_score = Column(Float, nullable=True)
+    slow_audio_score = Column(Float, nullable=True)
+    fast_video_score = Column(Float, nullable=True)
+    slow_video_score = Column(Float, nullable=True)
+    # Top contributing features (z-score explainability), JSON arrays
+    top_audio_features = Column(Text, nullable=True)
+    top_video_features = Column(Text, nullable=True)
+    # "audio-driven" | "video-driven" | "multimodal"
+    dominant_modality = Column(String(32), nullable=True)

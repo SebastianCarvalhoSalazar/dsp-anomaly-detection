@@ -4,11 +4,26 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, Session
 
 from .config import StorageConfig
 from .models import AnomalyEvent, Base
+
+# Columns added after v0.2.0. ``create_all`` handles fresh databases; this
+# map drives an idempotent ALTER for databases created by older versions.
+_ADDED_COLUMNS: dict[str, str] = {
+    "audio_score": "FLOAT",
+    "video_score": "FLOAT",
+    "combined_score": "FLOAT",
+    "fast_audio_score": "FLOAT",
+    "slow_audio_score": "FLOAT",
+    "fast_video_score": "FLOAT",
+    "slow_video_score": "FLOAT",
+    "top_audio_features": "TEXT",
+    "top_video_features": "TEXT",
+    "dominant_modality": "VARCHAR(32)",
+}
 
 
 class Database:
@@ -26,8 +41,31 @@ class Database:
         self._Session = sessionmaker(bind=self._engine)
 
     def init(self) -> None:
-        """Create all tables if they do not exist."""
+        """Create all tables if they do not exist, then run migrations."""
         Base.metadata.create_all(self._engine)
+        self._migrate_schema()
+
+    def _migrate_schema(self) -> None:
+        """Add columns introduced after v0.2.0 to a pre-existing table.
+
+        Idempotent: only columns missing from the live table are added, and
+        all are nullable, so events written by older versions remain valid.
+        """
+        insp = inspect(self._engine)
+        if not insp.has_table(AnomalyEvent.__tablename__):
+            return
+        existing = {c["name"] for c in insp.get_columns(AnomalyEvent.__tablename__)}
+        missing = {n: t for n, t in _ADDED_COLUMNS.items() if n not in existing}
+        if not missing:
+            return
+        with self._engine.begin() as conn:
+            for name, sqltype in missing.items():
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {AnomalyEvent.__tablename__} "
+                        f"ADD COLUMN {name} {sqltype}"
+                    )
+                )
 
     def save_event(self, event: AnomalyEvent) -> int:
         """Persist a new anomaly event. Returns the assigned database id."""

@@ -20,6 +20,12 @@ class DetectorConfig:
 
     # -- Z-score normalization (2.3) -------------------------------------------
     enable_zscore: bool = True
+    # Fix C1: once the model is fitted, do NOT fold windows that are
+    # currently flagged as raw anomalies into the running mean/variance.
+    # This prevents the normalizer from desensitising itself during the
+    # exact events it must detect (train/serve skew). Benign drift is
+    # still tracked. Set False to restore the legacy always-update path.
+    freeze_normalizer_on_anomaly: bool = True
 
     # -- Score smoothing / hysteresis (2.4) ------------------------------------
     ema_alpha: float = 0.3  # weight for current raw score in EMA
@@ -36,12 +42,32 @@ class DetectorConfig:
     # -- Persistent baseline (3.4) ---------------------------------------------
     state_path: str = "data/detector_state.pkl"
 
+    # -- Score calibration -----------------------------------------------------
+    # Fix C2: calibration bounds come from IsolationForest scores on the
+    # training buffer, so unseen points more anomalous than anything in
+    # training would clip to exactly 1.0 and become indistinguishable.
+    # We widen the lower bound by ``calibration_margin * (max - min)`` so
+    # the most anomalous *training* point maps below 1.0, leaving headroom
+    # for worse-than-training anomalies. Only affects the [0,1] display
+    # score; anomaly *decisions* use the raw score vs the threshold.
+    calibration_margin: float = 0.5
+
     # -- PCA dimensionality reduction ---------------------------------------
     enable_pca: bool = True
     pca_components: int = 25  # 99% variance in ~9; 25 adds safety margin
 
     # -- Drift detection (C2ST) -----------------------------------------------
     enable_drift_detection: bool = True
-    # Number of trees in the HistGradientBoosting classifier
-    # used for the Classifier Two-Sample Test (C2ST).
+    # Number of trees in the RandomForest classifier used for the
+    # Classifier Two-Sample Test (C2ST).
     c2st_n_estimators: int = 50
+
+    # -- Drift-aware refits (Req 7) -------------------------------------------
+    # When drift_auc exceeds the threshold, shorten the refit interval so the
+    # model adapts faster to a changing environment. Off by default to
+    # preserve the fixed-interval behaviour; the pipeline enables it.
+    enable_drift_aware_refit: bool = False
+    drift_refit_threshold: float = 0.8
+    # Effective interval under drift = refit_every * factor (clamped below).
+    drift_refit_factor: float = 0.5
+    min_refit_interval: int = 50

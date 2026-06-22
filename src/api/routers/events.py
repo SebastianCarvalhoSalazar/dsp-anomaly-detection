@@ -30,6 +30,10 @@ def _event_to_response(event: AnomalyEvent) -> EventResponse:
         has_audio=(event_dir / "audio.wav").exists(),
         has_frame=(event_dir / "frame.jpg").exists(),
         has_embedding=(event_dir / "embedding.npy").exists(),
+        audio_score=event.audio_score,
+        video_score=event.video_score,
+        combined_score=event.combined_score,
+        dominant_modality=event.dominant_modality,
     )
 
 
