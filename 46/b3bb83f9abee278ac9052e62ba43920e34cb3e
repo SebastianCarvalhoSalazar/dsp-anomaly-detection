@@ -1,0 +1,60 @@
+src/fusion/__init__.py
+  s_82d54c3d01e175::t_2f8e4b055606df 1-21
+tests/test_calibration.py
+  s_82d54c3d01e175::t_22024f05a94005 1-42
+tests/test_fusion.py
+  s_82d54c3d01e175::t_dbeaa74b974635 1-90
+docs/adr/README.md
+  s_82d54c3d01e175::t_2c0de65ec85ec7 19-21
+src/vision/motion.py
+  s_82d54c3d01e175::t_1a794264973da4 63-66,72
+src/vision_detection/__init__.py
+  s_82d54c3d01e175::t_44277734e49c92 1-11
+docs/adr/0005-configurable-fusion-strategies.md
+  s_82d54c3d01e175::t_1d32bec0cfb077 1-60
+docs/adr/0004-score-calibration-historical-percentiles.md
+  s_82d54c3d01e175::t_4777555a07f3a7 1-51
+src/vision_detection/detector.py
+  s_82d54c3d01e175::t_77971afa8e7871 1-45
+src/vision_detection/types.py
+  s_82d54c3d01e175::t_8c7ff1b9885d2b 1-51
+src/pipeline.py
+  s_82d54c3d01e175::t_78d01f3cae85ac 287-290
+  s_82d54c3d01e175::t_5483e9de3ca820 368-372,375-377,400-404
+  s_82d54c3d01e175::t_53ed1e03902dfb 340-344
+  s_82d54c3d01e175::t_cd0b8e12522055 216-232,238-240,260-265,267,274-276
+  s_82d54c3d01e175::t_c1d1d7ca33bf66 81-93
+  s_82d54c3d01e175::t_7431ffa6059ce8 164
+  s_82d54c3d01e175::t_6664f32c63ecaf 33,38
+  s_82d54c3d01e175::t_a5ae29c35bb928 177
+docs/adr/0006-no-pca-for-low-dim-video-features.md
+  s_82d54c3d01e175::t_06c94b400c7706 1-49
+src/fusion/strategies.py
+  s_82d54c3d01e175::t_69f8cf04de0e35 1-109
+src/fusion/calibration.py
+  s_82d54c3d01e175::t_92d4cec5f51fce 1-54
+tests/test_video_detection.py
+  s_82d54c3d01e175::t_068b7b61c882f8 1-83
+src/vision_detection/extractor.py
+  s_82d54c3d01e175::t_31f1d61fbd978b 1-42
+src/dashboard/pages/live_monitor.py
+  s_82d54c3d01e175::t_9fe914fc8775aa 5,24-32
+  s_82d54c3d01e175::t_7c76e05dad9b68 336-389
+  s_82d54c3d01e175::t_a06f1e1ef64ec6 261-262
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "46b3bb83f9abee278ac9052e62ba43920e34cb3e",
+  "prompts": {},
+  "sessions": {
+    "s_82d54c3d01e175": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6c2db251-c75e-47a9-9c9b-429f1fc63f54",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Sebastian Carvalho <sebastian.carvalho@mercadolibre.com.co>"
+    }
+  }
+}
