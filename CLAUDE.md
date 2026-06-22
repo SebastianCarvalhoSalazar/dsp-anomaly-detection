@@ -118,6 +118,17 @@ El sistema identifica cuál bounding box de movimiento es más probable que sea 
 
 ---
 
+## Flujo de trabajo Git
+
+El repo sigue **GitHub Flow + tags SemVer** (ver sección "Flujo de trabajo y ramas" en `README.md`):
+
+- Rama troncal única: **`main`** (default branch). No commitear directo; todo entra por PR.
+- Ramas cortas que nacen de `main` y vuelven por PR: `feature/<slug>`, `fix/<slug>`, `docs/<slug>`. Se borran tras el merge.
+- **No** crear ramas por versión (`dev/vX.Y.Z`) — las versiones se marcan con tags `vMAYOR.MENOR.PARCHE[-pre]` sobre `main`.
+- Las decisiones de arquitectura se documentan como ADRs en `docs/adr/` (formato MADR).
+
+---
+
 ## Prompt de implementación
 
 Usar este prompt al iniciar una sesión de desarrollo del MVP:

@@ -717,10 +717,74 @@ En macOS, PyTorch y OpenCV ambos linkan contra el framework Accelerate/OpenMP. C
 | Limitación | Descripción | Posible mejora |
 |---|---|---|
 | Sin GPU | Todo corre en CPU por defecto | Cambiar `device='cuda'` en `EmbeddingConfig` si hay GPU disponible |
-| Sin sincronización audio-video | MOG2 y DSP corren en threads independientes sin timestamp compartido | Cola de pares (audio_window, frame) con timestamp aligned |
 | FAISS no distribuido | Índice en un solo archivo local | Migrar a Qdrant para escalado horizontal |
+| Integridad FAISS↔SQLite cross-proceso | IDs posicionales y escritura no atómica del índice entre pipeline y API (hallazgos C3/C4) | `IndexIDMap2` con IDs = PK de SQLite + escritura atómica / file-lock |
+| Fusión no decide el gating | El `combined_score` se calibra/expone pero el gating de eventos sigue la ruta de audio | Promover la fusión a decisión detrás de un flag, midiendo FP/FN ([ADR-0005](docs/adr/0005-configurable-fusion-strategies.md)) |
 | Source correlation heurística | `source_score` usa IoU temporal + área ratio; no hay beamforming real | Audio-based localization con array de micrófonos |
-| Motion energy solo informativo | Se muestra en dashboard y metadata pero no suprime anomalías | Gate activo cuando haya datos etiquetados para calibrar umbral |
+
+> **Resuelto en v0.3:** la sincronización audio-video por timestamp ([ADR-0003](docs/adr/0003-timestamp-based-av-synchronization.md)) y el `motion_energy` acotado a `[0,1]` ya no son limitaciones. El detalle completo de riesgos y trabajo futuro está en [`docs/REPORT.md`](docs/REPORT.md).
+
+---
+
+## Flujo de trabajo y ramas (Git)
+
+El repositorio sigue **GitHub Flow + versionado semántico por tags**: una única
+rama troncal de larga vida y ramas de trabajo cortas que se integran por Pull
+Request. Las versiones se marcan con **tags inmutables**, no con ramas.
+
+### Ramas
+
+| Rama | Vida | Nace de | Se integra a | Propósito |
+|------|------|---------|--------------|-----------|
+| **`main`** | Permanente | — | — | Única rama troncal. Siempre desplegable; es el *default branch*. Solo recibe merges vía PR. |
+| **`feature/<slug>`** | Corta | `main` | `main` (PR) | Una funcionalidad nueva. Ej: `feature/multimodal-fusion-drift-aware`. |
+| **`fix/<slug>`** | Corta | `main` | `main` (PR) | Corrección de bug. Ej: `fix/faiss-id-desync`. |
+| **`docs/<slug>`** | Corta | `main` | `main` (PR) | Cambios solo de documentación. Ej: `docs/branching-workflow`. |
+
+**Reglas:**
+
+- ✅ Toda rama de trabajo **nace de `main` actualizado** y vuelve a `main` por PR.
+- ✅ Ramas cortas: se borran tras el merge (local y remoto).
+- ✅ No se commitea directo a `main`; los cambios pasan por PR.
+- ❌ **No** se crea una rama por versión (`dev/vX.Y.Z`) — eso es lo que hacen los tags.
+
+### Tags (releases)
+
+Cada versión publicada se marca con un tag `vMAYOR.MENOR.PARCHE[-pre]`
+([SemVer](https://semver.org/lang/es/)) sobre el commit correspondiente de `main`:
+
+```bash
+git tag v0.3.0-alpha            # marca el commit actual
+git push origin v0.3.0-alpha
+```
+
+Tags existentes: `v0.1.0-alpha`, `v0.2.0-alpha` (hitos previos preservados).
+
+### Ciclo típico
+
+```bash
+# 1. Partir de main actualizado
+git checkout main && git pull --ff-only
+
+# 2. Crear la rama de trabajo
+git checkout -b feature/mi-cambio
+
+# 3. Trabajar y commitear
+git add -A && git commit -m "feat: ..."
+
+# 4. Subir y abrir PR contra main
+git push -u origin feature/mi-cambio
+gh pr create --base main
+
+# 5. Tras el merge: limpiar
+git checkout main && git pull --ff-only
+git branch -d feature/mi-cambio
+git push origin --delete feature/mi-cambio   # si no se borró desde la UI
+```
+
+> Las decisiones de arquitectura se registran como ADRs en
+> [`docs/adr/`](docs/adr/) (formato MADR). Toda decisión técnica significativa
+> debería acompañarse de un ADR nuevo.
 
 ---
 
