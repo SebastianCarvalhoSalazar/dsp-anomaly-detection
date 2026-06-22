@@ -32,6 +32,7 @@ from src.dsp import AudioProcessor, DSPConfig
 from src.embeddings import MultimodalEncoder
 from src.storage import Database, EventStore, FAISSStore, StorageConfig
 from src.storage.models import AnomalyEvent
+from src.sync import FrameRingBuffer
 from src.vision import FrameCapture, MotionDetector, VisionConfig
 
 logger = logging.getLogger(__name__)
@@ -77,8 +78,10 @@ class Pipeline:
 
         # Queue for passing audio windows from the sounddevice callback
         self._audio_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=64)
-        self._latest_frame: Optional[np.ndarray] = None
-        self._frame_lock = threading.Lock()
+        # Ring buffer of timestamped frames for audio-video temporal
+        # alignment: each audio window is matched to the nearest frame in
+        # time (not simply "the last frame captured").
+        self._frame_buffer = FrameRingBuffer(maxlen=64)
         self._running = False
 
         # Rolling buffer of raw audio samples: keeps the last 3 seconds
@@ -171,6 +174,10 @@ class Pipeline:
             except queue.Empty:
                 continue
 
+            # Timestamp the audio window at dequeue time so it can be matched
+            # to the nearest captured frame.
+            ts_window = time.time()
+
             _window_count += 1
             if _window_count % _reset_check_interval == 0:
                 self._check_reset()
@@ -182,8 +189,10 @@ class Pipeline:
             rms = float(np.sqrt(np.mean(window ** 2)))
             result = self.detector.score(feature_vec)
 
-            with self._frame_lock:
-                frame = self._latest_frame.copy() if self._latest_frame is not None else None
+            # Temporal alignment: pick the frame nearest in time to this
+            # audio window (frames are already copies — no copy needed here).
+            captured = self._frame_buffer.nearest(ts_window)
+            frame = captured.frame if captured is not None else None
 
             boxes = self.vision.detect(frame) if frame is not None else []
 
@@ -242,27 +251,27 @@ class Pipeline:
             metadata for later cross-modal analysis.
         """
         ts = datetime.fromtimestamp(result.timestamp, tz=timezone.utc)
+        boxes_json = [
+            {
+                "x": b.x, "y": b.y,
+                "w": b.w, "h": b.h,
+                "source_score": round(b.source_score, 4),
+            }
+            for b in boxes
+        ]
+        extra_meta = {
+            "window_index": result.window_index,
+            "raw_score": result.raw_score,
+            "motion_energy": motion_energy,
+            "bounding_boxes": boxes_json,
+        }
         event_dir = self.event_store.save_event(
             timestamp=ts,
             audio=audio_window,
             sample_rate=self.dsp._config.sample_rate,
             frame=frame,
             anomaly_score=result.anomaly_score,
-            extra_metadata={
-                "window_index": result.window_index,
-                "raw_score": result.raw_score,
-                "motion_energy": motion_energy,
-                "bounding_boxes": [
-                    {
-                        "x": b.x, "y": b.y,
-                        "w": b.w, "h": b.h,
-                        "source_score": round(
-                            b.source_score, 4,
-                        ),
-                    }
-                    for b in boxes
-                ],
-            },
+            extra_metadata=extra_meta,
         )
 
         embedding = self.encoder.encode(audio_window, frame=frame)
@@ -277,32 +286,36 @@ class Pipeline:
             audio_path=str(event_dir / "audio.wav"),
             frame_path=str(event_dir / "frame.jpg") if frame is not None else None,
             embedding_path=str(event_dir / "embedding.npy"),
-            source_region_json=json.dumps([
-                {
-                    "x": b.x, "y": b.y,
-                    "w": b.w, "h": b.h,
-                    "source_score": round(
-                        b.source_score, 4,
-                    ),
-                }
-                for b in boxes
-            ]),
+            source_region_json=json.dumps(boxes_json),
+            # M13: persist the same metadata to the DB column, not just JSON.
+            extra_json=json.dumps(extra_meta),
+            # Single-modality operation: audio == combined (video lands in
+            # Fase 2). All multimodal columns are populated for forward compat.
+            audio_score=result.anomaly_score,
+            combined_score=result.anomaly_score,
+            dominant_modality="audio",
         )
         self.db.save_event(orm_event)
         logger.info("Anomaly event saved: %s (score=%.3f)", event_dir, result.anomaly_score)
 
     def _camera_loop(self) -> None:
-        """Background thread: capture frames and update self._latest_frame."""
+        """Background thread: capture timestamped frames into the ring buffer."""
         try:
             self.frame_capture.open()
-            while self._running:
-                frame = self.frame_capture.read()
-                if frame is not None:
-                    with self._frame_lock:
-                        self._latest_frame = frame
-                time.sleep(1.0 / 25)
         except Exception as exc:
             logger.warning("Camera unavailable: %s", exc)
+            return
+        # A single read error must not kill the thread for the whole process
+        # lifetime — catch per iteration and keep going.
+        while self._running:
+            try:
+                frame = self.frame_capture.read()
+                if frame is not None:
+                    # Store a copy: cv2 may reuse the read buffer (C5).
+                    self._frame_buffer.push(frame.copy(), time.time())
+            except Exception as exc:
+                logger.debug("Camera read failed: %s", exc)
+            time.sleep(1.0 / 25)
 
     def _notify_api(self, result, boxes, *, rms: float = 0.0) -> None:
         """POST anomaly score to API for WebSocket broadcast (fire-and-forget).
@@ -331,6 +344,10 @@ class Pipeline:
                 ],
                 "motion_energy": self._last_motion_energy,
                 "rms": round(rms, 6),
+                # Single-modality operation: audio == combined for now.
+                "audio_score": result.anomaly_score,
+                "combined_score": result.anomaly_score,
+                "dominant_modality": "audio",
             }
             # Drift detection metrics
             drift = self.detector.get_drift_metrics()

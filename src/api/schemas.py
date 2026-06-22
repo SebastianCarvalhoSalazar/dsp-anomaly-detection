@@ -15,6 +15,11 @@ class EventResponse(BaseModel):
     has_audio: bool
     has_frame: bool
     has_embedding: bool
+    # Multimodal fields (v0.3) — None for events written by older versions
+    audio_score: Optional[float] = None
+    video_score: Optional[float] = None
+    combined_score: Optional[float] = None
+    dominant_modality: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -39,6 +44,19 @@ class AnomalyScoreMessage(BaseModel):
     drift_auc: float = 0.5
     top_drift_features: list[str] = []
     refit_count: int = 0
+    # -- Multimodal scores (v0.3) ------------------------------------------
+    # Defaults keep older dashboard clients working. In single-modality
+    # operation audio_score == combined_score == anomaly_score.
+    audio_score: float = 0.0
+    video_score: float = 0.0
+    combined_score: float = 0.0
+    fast_audio_score: float = 0.0
+    slow_audio_score: float = 0.0
+    fast_video_score: float = 0.0
+    slow_video_score: float = 0.0
+    top_audio_features: list[str] = []
+    top_video_features: list[str] = []
+    dominant_modality: str = "audio"
 
 
 class OfflineAnalysisResponse(BaseModel):
