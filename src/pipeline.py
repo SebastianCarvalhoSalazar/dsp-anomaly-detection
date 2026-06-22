@@ -97,6 +97,12 @@ class Pipeline:
         self.audio_calibrator = PercentileCalibrator()
         self.video_calibrator = PercentileCalibrator()
         self.fusion_strategy = WeightedAverage(audio_weight=0.5)
+        # By default the event-gating decision follows the audio detector (the
+        # established fast path). Opt-in to let the fused combined_score gate
+        # events instead — keep off until FP/FN are validated on real data.
+        self._fusion_gates = os.getenv(
+            "FUSION_GATES_DECISION", "false"
+        ).lower() in ("1", "true", "yes")
 
         # Dual horizon (Req 6): an optional "slow" model per modality with a
         # large buffer reflects long-term behaviour. The final decision still
@@ -330,8 +336,10 @@ class Pipeline:
             # Notify API (non-blocking fire-and-forget)
             self._notify_api(result, boxes, rms=rms, mm=mm)
 
-            # Event gating still follows the audio detector (fast path).
-            if result.is_anomaly:
+            # Event gating: audio detector by default; the fused decision only
+            # when explicitly enabled (FUSION_GATES_DECISION).
+            gate = fusion.is_anomaly if self._fusion_gates else result.is_anomaly
+            if gate:
                 # Snapshot the pre-event buffer (last 3s) as the event audio
                 audio_clip = np.array(list(self._pre_audio_buffer), dtype=np.float32)
                 self._handle_anomaly(
@@ -382,16 +390,18 @@ class Pipeline:
             anomaly_score=result.anomaly_score,
             extra_metadata=extra_meta,
         )
+        # H3: store an absolute, CWD-independent path (pipeline and API are
+        # separate processes that may run from different directories).
+        event_dir = event_dir.resolve()
 
         embedding = self.encoder.encode(audio_window, frame=frame)
         self.event_store.save_embedding(event_dir, embedding)
-        faiss_id = self.faiss_store.add(embedding)
 
         orm_event = AnomalyEvent(
             timestamp=ts,
             anomaly_score=result.anomaly_score,
             event_dir=str(event_dir),
-            faiss_index_id=faiss_id,
+            faiss_index_id=None,  # set after FAISS add succeeds
             audio_path=str(event_dir / "audio.wav"),
             frame_path=str(event_dir / "frame.jpg") if frame is not None else None,
             embedding_path=str(event_dir / "embedding.npy"),
@@ -406,7 +416,12 @@ class Pipeline:
             top_audio_features=json.dumps(mm.get("top_audio_features", [])),
             top_video_features=json.dumps(mm.get("top_video_features", [])),
         )
-        self.db.save_event(orm_event)
+        # C3/L1: persist the row first to get its PK, then index the embedding
+        # in FAISS under that *stable* ID. If FAISS fails, the row simply has a
+        # NULL faiss_index_id (no orphaned vector, no ID desync).
+        event_id = self.db.save_event(orm_event)
+        self.faiss_store.add(embedding, faiss_id=event_id)
+        self.db.update_faiss_id(event_id, event_id)
         logger.info("Anomaly event saved: %s (score=%.3f)", event_dir, result.anomaly_score)
 
     def _camera_loop(self) -> None:

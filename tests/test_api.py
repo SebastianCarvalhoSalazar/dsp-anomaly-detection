@@ -495,15 +495,17 @@ def _insert_event_with_embedding(
     emb = rng.standard_normal(1536).astype(np.float32)
     emb = emb / np.linalg.norm(emb)
     event_store.save_embedding(event_dir, emb)
-    faiss_id = faiss_store.add(emb)
     orm_event = AnomalyEvent(
         timestamp=ts,
         anomaly_score=score,
         event_dir=str(event_dir),
-        faiss_index_id=faiss_id,
         embedding_path=str(event_dir / "embedding.npy"),
     )
-    return db.save_event(orm_event)
+    # New contract: persist first to get the PK, index under that stable ID.
+    event_id = db.save_event(orm_event)
+    faiss_store.add(emb, faiss_id=event_id)
+    db.update_faiss_id(event_id, event_id)
+    return event_id
 
 
 def test_search_by_event_returns_similar(tmp_stores, tmp_path):

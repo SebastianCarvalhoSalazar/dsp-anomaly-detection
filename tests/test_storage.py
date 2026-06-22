@@ -211,21 +211,31 @@ def _make_embedding(seed: int = 0) -> np.ndarray:
     return v / np.linalg.norm(v)
 
 
-def test_faiss_add_returns_sequential_id(faiss_store):
-    for expected_id in range(5):
-        idx = faiss_store.add(_make_embedding(expected_id))
-        assert idx == expected_id
+def test_faiss_add_echoes_explicit_id(faiss_store):
+    for explicit_id in (10, 20, 30):
+        returned = faiss_store.add(_make_embedding(explicit_id), faiss_id=explicit_id)
+        assert returned == explicit_id
+
+
+def test_faiss_search_returns_explicit_ids(faiss_store):
+    """search() returns the caller-supplied IDs (the SQLite PKs), not positions."""
+    faiss_store.add(_make_embedding(0), faiss_id=100)
+    faiss_store.add(_make_embedding(1), faiss_id=200)
+    emb = _make_embedding(5)
+    faiss_store.add(emb, faiss_id=300)
+    D, I = faiss_store.search(emb, k=1)
+    assert int(I[0, 0]) == 300  # the matching vector's explicit id
 
 
 def test_faiss_get_total(faiss_store):
     for i in range(3):
-        faiss_store.add(_make_embedding(i))
+        faiss_store.add(_make_embedding(i), faiss_id=i)
     assert faiss_store.get_total() == 3
 
 
 def test_faiss_search_shape(faiss_store):
     for i in range(5):
-        faiss_store.add(_make_embedding(i))
+        faiss_store.add(_make_embedding(i), faiss_id=i)
     D, I = faiss_store.search(_make_embedding(0), k=3)
     assert D.shape == (1, 3)
     assert I.shape == (1, 3)
@@ -233,7 +243,7 @@ def test_faiss_search_shape(faiss_store):
 
 def test_faiss_identical_vector_cosine_similarity_is_one(faiss_store):
     emb = _make_embedding(7)
-    faiss_store.add(emb)
+    faiss_store.add(emb, faiss_id=7)
     D, I = faiss_store.search(emb, k=1)
     assert abs(D[0, 0] - 1.0) < 1e-5
 
@@ -241,6 +251,23 @@ def test_faiss_identical_vector_cosine_similarity_is_one(faiss_store):
 def test_faiss_search_empty_returns_empty(faiss_store):
     D, I = faiss_store.search(_make_embedding(0), k=5)
     assert D.shape[1] == 0
+
+
+def test_faiss_remove_by_id(faiss_store):
+    """Removing by ID drops the vector (no orphan) and is reflected in search."""
+    faiss_store.add(_make_embedding(0), faiss_id=1)
+    faiss_store.add(_make_embedding(1), faiss_id=2)
+    assert faiss_store.remove(1) == 1
+    assert faiss_store.get_total() == 1
+    # The remaining vector keeps its explicit id.
+    _, I = faiss_store.search(_make_embedding(1), k=1)
+    assert int(I[0, 0]) == 2
+
+
+def test_faiss_dim_mismatch_raises(faiss_store):
+    import numpy as _np
+    with pytest.raises(ValueError):
+        faiss_store.add(_np.zeros(10, dtype=_np.float32), faiss_id=1)
 
 
 def test_faiss_persists_and_reloads(tmp_path):
@@ -251,12 +278,14 @@ def test_faiss_persists_and_reloads(tmp_path):
     store1 = FAISSStore(config)
     store1.init()
     for i in range(5):
-        store1.add(_make_embedding(i))
+        store1.add(_make_embedding(i), faiss_id=i)
 
-    # Reload from disk
+    # Reload from disk preserves vectors and their explicit ids.
     store2 = FAISSStore(config)
     store2.init()
     assert store2.get_total() == 5
+    _, I = store2.search(_make_embedding(3), k=1)
+    assert int(I[0, 0]) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -320,13 +349,27 @@ def test_event_store_validate_rejects_absolute_outside(tmp_path):
         store.load_embedding(Path("/tmp/evil"))
 
 
+def test_safe_event_dir_accepts_inside_rejects_traversal(tmp_path):
+    """H2: safe_event_dir returns an absolute path for valid dirs and rejects
+    anything resolving outside the events directory."""
+    root = tmp_path / "eventos"
+    config = StorageConfig(events_dir=str(root))
+    store = EventStore(config)
+
+    good = store.safe_event_dir(str(root / "2024-01-01T00-00-00"))
+    assert good.is_absolute()
+
+    with pytest.raises(ValueError):
+        store.safe_event_dir(str(root / ".." / "etc" / "passwd"))
+
+
 # ---------------------------------------------------------------------------
 # FAISSStore — clear
 # ---------------------------------------------------------------------------
 
 def test_faiss_clear_resets_to_zero(faiss_store):
     for i in range(5):
-        faiss_store.add(_make_embedding(i))
+        faiss_store.add(_make_embedding(i), faiss_id=i)
     assert faiss_store.get_total() == 5
     faiss_store.clear()
     assert faiss_store.get_total() == 0
@@ -339,7 +382,7 @@ def test_faiss_clear_persists_empty_index(tmp_path):
     )
     store = FAISSStore(config)
     store.init()
-    store.add(_make_embedding(0))
+    store.add(_make_embedding(0), faiss_id=0)
     store.clear()
 
     # Reloading should show 0 vectors
@@ -349,10 +392,9 @@ def test_faiss_clear_persists_empty_index(tmp_path):
 
 
 def test_faiss_usable_after_clear(faiss_store):
-    faiss_store.add(_make_embedding(0))
+    faiss_store.add(_make_embedding(0), faiss_id=1)
     faiss_store.clear()
-    idx = faiss_store.add(_make_embedding(1))
-    assert idx == 0  # sequential IDs restart from 0 after clear
+    faiss_store.add(_make_embedding(1), faiss_id=2)
     assert faiss_store.get_total() == 1
 
 
@@ -366,14 +408,14 @@ def test_faiss_reload_picks_up_vectors_from_another_instance(tmp_path):
     writer = FAISSStore(config)
     writer.init()
     for i in range(3):
-        writer.add(_make_embedding(i))
+        writer.add(_make_embedding(i), faiss_id=i)
 
     # API instance: loaded at startup when index was empty
     reader = FAISSStore(config)
     reader.init()  # reloads from disk — should already see the 3 vectors
 
     # Simulate pipeline adding more vectors AFTER the API started
-    writer.add(_make_embedding(99))
+    writer.add(_make_embedding(99), faiss_id=99)
 
     # Before reload, reader still sees 3
     assert reader.get_total() == 3
