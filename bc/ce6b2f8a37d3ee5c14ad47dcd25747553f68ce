@@ -1,0 +1,24 @@
+docs/REPORT.md
+  s_82d54c3d01e175::t_e913bb44996cb8 1-126
+README.md
+  s_82d54c3d01e175::t_c5695966325005 21-50
+  s_82d54c3d01e175::t_fcb5ec8661b4e2 597,603-617
+docs/architecture/multimodal-overview.md
+  s_82d54c3d01e175::t_155103cbb05501 1-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "bcce6b2f8a37d3ee5c14ad47dcd25747553f68ce",
+  "prompts": {},
+  "sessions": {
+    "s_82d54c3d01e175": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6c2db251-c75e-47a9-9c9b-429f1fc63f54",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Sebastian Carvalho <sebastian.carvalho@mercadolibre.com.co>"
+    }
+  }
+}
