@@ -1,0 +1,49 @@
+src/api/schemas.py
+  s_82d54c3d01e175::t_fb67d8fe200b50 47-59
+  s_82d54c3d01e175::t_c6270f4114a2b8 18-22
+docs/adr/0011-backward-compatible-event-schema-migration.md
+  s_82d54c3d01e175::t_a1c95077e2ea20 1-56
+src/storage/db.py
+  s_82d54c3d01e175::t_67e3b883b035a2 7,13-26
+  s_82d54c3d01e175::t_9fbd65675205b4 44,46-68
+src/storage/models.py
+  s_82d54c3d01e175::t_73f17226a3e3c4 26-41
+tests/test_sync.py
+  s_82d54c3d01e175::t_80c0fbfb799203 1-87
+docs/adr/README.md
+  s_82d54c3d01e175::t_57667ce654a3df 26
+  s_82d54c3d01e175::t_2eaa0bb330542f 18
+src/sync/__init__.py
+  s_82d54c3d01e175::t_9bfadd11d67edf 1-3
+src/sync/buffer.py
+  s_82d54c3d01e175::t_2fbfc7d467010e 1-87
+src/api/routers/events.py
+  s_82d54c3d01e175::t_5e834fcd5807c8 33-36
+src/pipeline.py
+  s_82d54c3d01e175::t_cc25aef2a8261b 347-350
+  s_82d54c3d01e175::t_3fc74e0a675dda 302,307-318
+  s_82d54c3d01e175::t_2119e5671d0142 81-84
+  s_82d54c3d01e175::t_ccdb36cc1d4f3b 177-180,192-195
+  s_82d54c3d01e175::t_1c5c004bcecbb9 254-267,274,289-296
+  s_82d54c3d01e175::t_fe486734998a40 35
+tests/test_schema_migration.py
+  s_82d54c3d01e175::t_60c9ca27c42c74 1-74
+docs/adr/0003-timestamp-based-av-synchronization.md
+  s_82d54c3d01e175::t_21da744c7c8aa4 1-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "266410c2ded9d0af22a7b921faa69ac28ce6811b",
+  "prompts": {},
+  "sessions": {
+    "s_82d54c3d01e175": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6c2db251-c75e-47a9-9c9b-429f1fc63f54",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Sebastian Carvalho <sebastian.carvalho@mercadolibre.com.co>"
+    }
+  }
+}
