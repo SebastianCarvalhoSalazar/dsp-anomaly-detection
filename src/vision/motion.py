@@ -60,14 +60,16 @@ class MotionDetector:
             cv2.CHAIN_APPROX_SIMPLE,
         )
 
-        # Raw boxes (no area filter yet — merging may grow them)
+        # Raw boxes (no area filter yet — merging may grow them).
+        # M7: use bounding-rect area (w*h) for consistency with merged
+        # boxes (_union_box also uses w*h); contourArea vs w*h previously
+        # mixed units across the min_area filter and source-score ranking.
         raw: list[BoundingBox] = []
         for contour in contours:
-            area = int(cv2.contourArea(contour))
             x, y, w, h = cv2.boundingRect(contour)
             raw.append(
                 BoundingBox(
-                    x=x, y=y, w=w, h=h, area=area,
+                    x=x, y=y, w=w, h=h, area=w * h,
                 )
             )
 

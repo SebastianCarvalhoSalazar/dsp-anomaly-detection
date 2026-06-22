@@ -30,10 +30,12 @@ import sounddevice as sd
 from src.detection import AnomalyDetector, DetectorConfig
 from src.dsp import AudioProcessor, DSPConfig
 from src.embeddings import MultimodalEncoder
+from src.fusion import PercentileCalibrator, WeightedAverage
 from src.storage import Database, EventStore, FAISSStore, StorageConfig
 from src.storage.models import AnomalyEvent
 from src.sync import FrameRingBuffer
 from src.vision import FrameCapture, MotionDetector, VisionConfig
+from src.vision_detection import VideoAnomalyDetector, VideoFeatureExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +77,19 @@ class Pipeline:
         self.db = Database(config)
         self.vision = MotionDetector(VisionConfig())
         self.frame_capture = FrameCapture(VisionConfig())
+
+        # --- Multimodal detection (v0.3) ---------------------------------
+        # Independent video detector + per-modality score calibration +
+        # configurable late fusion. The final event-gating decision still
+        # follows the audio detector (the fast, established path); the fused
+        # combined_score is calibrated, exposed and stored for observability.
+        self.video_detector = VideoAnomalyDetector()
+        if self.video_detector.load_state():
+            logger.info("Loaded video detector state from disk.")
+        self.video_extractor = VideoFeatureExtractor()
+        self.audio_calibrator = PercentileCalibrator()
+        self.video_calibrator = PercentileCalibrator()
+        self.fusion_strategy = WeightedAverage(audio_weight=0.5)
 
         # Queue for passing audio windows from the sounddevice callback
         self._audio_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=64)
@@ -146,6 +161,7 @@ class Pipeline:
             # Persistent baseline: save state for next run
             try:
                 self.detector.save_state()
+                self.video_detector.save_state()
                 logger.info("Detector state saved.")
             except Exception as exc:
                 logger.warning(
@@ -158,6 +174,7 @@ class Pipeline:
             resp = httpx.get(API_RESET_PENDING_URL, timeout=0.5)
             if resp.status_code == 200 and resp.json().get("pending"):
                 self.detector.reset()
+                self.video_detector.reset()
                 self._pre_audio_buffer.clear()
                 logger.info("Detector reset: buffer cleared, warmup restarted.")
         except Exception as exc:
@@ -196,13 +213,31 @@ class Pipeline:
 
             boxes = self.vision.detect(frame) if frame is not None else []
 
+            # --- Video modality -------------------------------------------
+            # Extract motion features while boxes still carry their IoU
+            # temporal weights (the source-ranking below overwrites them).
+            if frame is not None:
+                video_fv = self.video_extractor.extract(boxes, frame.shape)
+                video_result = self.video_detector.score(video_fv.to_array())
+                video_raw = video_result.anomaly_score
+            else:
+                video_raw = 0.0
+
+            # --- Calibration + fusion -------------------------------------
+            audio_cal = self.audio_calibrator.calibrate_and_update(
+                result.anomaly_score
+            )
+            video_cal = self.video_calibrator.calibrate_and_update(video_raw)
+            fusion = self.fusion_strategy.combine(audio_cal, video_cal)
+
             # Cross-modal correlation (3.2)
             if boxes and frame is not None:
                 frame_area = float(
                     frame.shape[0] * frame.shape[1]
                 )
-                self._last_motion_energy = (
-                    sum(b.area for b in boxes) / frame_area
+                # Clamp to [0,1]: overlapping boxes can sum past frame_area (M7).
+                self._last_motion_energy = min(
+                    sum(b.area for b in boxes) / frame_area, 1.0
                 )
                 # Source-score ranking (Option B):
                 # score = anomaly_score × area_ratio × temporal_weight
@@ -222,14 +257,23 @@ class Pipeline:
                 self._last_motion_energy *= 0.9  # decay
 
             # Notify API (non-blocking fire-and-forget)
-            self._notify_api(result, boxes, rms=rms)
+            self._notify_api(
+                result, boxes, rms=rms,
+                audio_score=audio_cal, video_score=video_cal,
+                combined_score=fusion.combined_score,
+                dominant_modality=fusion.dominant_modality,
+            )
 
+            # Event gating still follows the audio detector (fast path).
             if result.is_anomaly:
                 # Snapshot the pre-event buffer (last 3s) as the event audio
                 audio_clip = np.array(list(self._pre_audio_buffer), dtype=np.float32)
                 self._handle_anomaly(
                     result, audio_clip, frame, boxes,
                     motion_energy=self._last_motion_energy,
+                    audio_score=audio_cal, video_score=video_cal,
+                    combined_score=fusion.combined_score,
+                    dominant_modality=fusion.dominant_modality,
                 )
 
     def _handle_anomaly(
@@ -240,6 +284,10 @@ class Pipeline:
         boxes,
         *,
         motion_energy: float = 0.0,
+        audio_score: float = 0.0,
+        video_score: float = 0.0,
+        combined_score: float = 0.0,
+        dominant_modality: str = "audio",
     ) -> None:
         """Persist an anomaly event: filesystem → FAISS → SQLite.
 
@@ -289,11 +337,11 @@ class Pipeline:
             source_region_json=json.dumps(boxes_json),
             # M13: persist the same metadata to the DB column, not just JSON.
             extra_json=json.dumps(extra_meta),
-            # Single-modality operation: audio == combined (video lands in
-            # Fase 2). All multimodal columns are populated for forward compat.
-            audio_score=result.anomaly_score,
-            combined_score=result.anomaly_score,
-            dominant_modality="audio",
+            # Calibrated per-modality + fused scores (v0.3).
+            audio_score=audio_score,
+            video_score=video_score,
+            combined_score=combined_score,
+            dominant_modality=dominant_modality,
         )
         self.db.save_event(orm_event)
         logger.info("Anomaly event saved: %s (score=%.3f)", event_dir, result.anomaly_score)
@@ -317,11 +365,16 @@ class Pipeline:
                 logger.debug("Camera read failed: %s", exc)
             time.sleep(1.0 / 25)
 
-    def _notify_api(self, result, boxes, *, rms: float = 0.0) -> None:
+    def _notify_api(
+        self, result, boxes, *, rms: float = 0.0,
+        audio_score: float = 0.0, video_score: float = 0.0,
+        combined_score: float = 0.0, dominant_modality: str = "audio",
+    ) -> None:
         """POST anomaly score to API for WebSocket broadcast (fire-and-forget).
 
-        The payload includes ``motion_energy`` and ``rms`` so the dashboard
-        can correlate visual activity and audio amplitude in real time.
+        The payload includes ``motion_energy`` and ``rms`` plus the calibrated
+        per-modality and fused scores so the dashboard can correlate visual
+        activity and audio amplitude and recompute fusion strategies live.
         """
         try:
             payload = {
@@ -344,10 +397,11 @@ class Pipeline:
                 ],
                 "motion_energy": self._last_motion_energy,
                 "rms": round(rms, 6),
-                # Single-modality operation: audio == combined for now.
-                "audio_score": result.anomaly_score,
-                "combined_score": result.anomaly_score,
-                "dominant_modality": "audio",
+                # Calibrated per-modality + fused scores (v0.3).
+                "audio_score": round(audio_score, 6),
+                "video_score": round(video_score, 6),
+                "combined_score": round(combined_score, 6),
+                "dominant_modality": dominant_modality,
             }
             # Drift detection metrics
             drift = self.detector.get_drift_metrics()

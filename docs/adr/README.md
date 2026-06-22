@@ -16,9 +16,9 @@ fusión tardía** (audio + video) descrita en el plan
 | [0001](0001-late-fusion-multimodal-architecture.md) | Arquitectura multimodal de fusión tardía | Aceptado | — |
 | [0002](0002-shared-base-detector-refactor.md) | Refactor a `BaseAnomalyDetector` compartido (fix C1/C2/H1) | Aceptado | 0 |
 | [0003](0003-timestamp-based-av-synchronization.md) | Sincronización audio-video por timestamp (ring buffer + nearest-frame) | Aceptado | 1 |
-| 0004 | Calibración de scores por percentiles históricos | Planeado | 2 |
-| 0005 | Estrategias de fusión configurables (patrón Strategy) | Planeado | 2 |
-| 0006 | Sin PCA para features de video de baja dimensión | Planeado | 2 |
+| [0004](0004-score-calibration-historical-percentiles.md) | Calibración de scores por percentiles históricos | Aceptado | 2 |
+| [0005](0005-configurable-fusion-strategies.md) | Estrategias de fusión configurables (patrón Strategy) | Aceptado | 2 |
+| [0006](0006-no-pca-for-low-dim-video-features.md) | Sin PCA para features de video de baja dimensión | Aceptado | 2 |
 | 0007 | Doble horizonte temporal (modelo rápido / lento) | Planeado | 3 |
 | 0008 | Política de refit sensible a drift | Planeado | 3 |
 | 0009 | Snapshots de modelos y retención | Planeado | 3 |
