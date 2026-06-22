@@ -1,0 +1,34 @@
+# Architecture Decision Records (ADR)
+
+Registro de decisiones de arquitectura del proyecto, en formato
+[MADR](https://adr.github.io/madr/). Cada ADR captura una decisión
+significativa: su contexto, las opciones evaluadas, la decisión tomada y
+sus consecuencias. Usar [`0000-template.md`](0000-template.md) como base.
+
+Estas decisiones acompañan la evolución a un **detector multimodal de
+fusión tardía** (audio + video) descrita en el plan
+`feature/multimodal-fusion-drift-aware`.
+
+## Índice
+
+| ADR | Título | Estado | Fase |
+|-----|--------|--------|------|
+| [0001](0001-late-fusion-multimodal-architecture.md) | Arquitectura multimodal de fusión tardía | Aceptado | — |
+| [0002](0002-shared-base-detector-refactor.md) | Refactor a `BaseAnomalyDetector` compartido (fix C1/C2/H1) | Aceptado | 0 |
+| 0003 | Sincronización audio-video por timestamp (ring buffer + nearest-frame) | Planeado | 1 |
+| 0004 | Calibración de scores por percentiles históricos | Planeado | 2 |
+| 0005 | Estrategias de fusión configurables (patrón Strategy) | Planeado | 2 |
+| 0006 | Sin PCA para features de video de baja dimensión | Planeado | 2 |
+| 0007 | Doble horizonte temporal (modelo rápido / lento) | Planeado | 3 |
+| 0008 | Política de refit sensible a drift | Planeado | 3 |
+| 0009 | Snapshots de modelos y retención | Planeado | 3 |
+| 0010 | Explicabilidad por z-score vs baseline reciente | Planeado | 3 |
+| 0011 | Migración de esquema de eventos compatible hacia atrás | Planeado | 1 |
+
+## Convenciones
+
+- Numeración secuencial de 4 dígitos; nunca reusar números.
+- Un ADR es inmutable una vez **Aceptado**: si cambia, se crea uno nuevo que
+  lo *reemplaza* y se actualiza el estado del anterior.
+- Enlazar los hallazgos del análisis (`Cx`/`Hx`/`Mx`) y los requisitos del
+  plan que motivan cada decisión.

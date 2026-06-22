@@ -58,6 +58,31 @@ class AudioProcessor:
     def feature_dim(self) -> int:
         return self._config.feature_dim
 
+    @property
+    def feature_names(self) -> list[str]:
+        """Human-readable name for each feature, in vector order.
+
+        Built from the *actual* config (scattering count, wavelet level,
+        deltas on/off) so downstream drift / explainability labels stay
+        correct even when the layout changes — unlike a hardcoded layout
+        in the detector (fix H6).
+        """
+        names: list[str] = [f"scat_{i}" for i in range(self._n_scattering)]
+        names += [
+            f"wavelet_band_{k}"
+            for k in range(self._config.wavelet_level + 1)
+        ]
+        names += ["rms", "zcr"]
+        names += [
+            "spectral_centroid",
+            "spectral_flatness",
+            "spectral_rolloff",
+            "spectral_bandwidth",
+        ]
+        if self._config.enable_deltas:
+            names += ["delta_rms", "delta_centroid", "delta_scat_energy"]
+        return names
+
     # ------------------------------------------------------------------ #
     #  Public API                                                         #
     # ------------------------------------------------------------------ #

@@ -56,7 +56,11 @@ class Pipeline:
             faiss_path=os.getenv("FAISS_PATH", "data/faiss.index"),
         )
         self.dsp = AudioProcessor(DSPConfig())
-        self.detector = AnomalyDetector(DetectorConfig())
+        # Inject the real feature-name layout (H6) so drift / explainability
+        # labels stay correct regardless of the DSP config.
+        self.detector = AnomalyDetector(
+            DetectorConfig(), feature_names=self.dsp.feature_names
+        )
         self.encoder = MultimodalEncoder()
 
         # Persistent baseline (3.4): try to restore previous session
