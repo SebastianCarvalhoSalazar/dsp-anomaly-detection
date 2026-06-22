@@ -18,6 +18,36 @@ El sistema procesa continuamente audio del micrófono y video de la cámara para
 
 ---
 
+## v0.3 — Detección multimodal de fusión tardía
+
+A partir de la rama `feature/multimodal-fusion-drift-aware`, el sistema evoluciona
+de un detector unimodal de audio a un **detector multimodal de fusión tardía**.
+Las decisiones de arquitectura están documentadas como ADRs en
+[`docs/adr/`](docs/adr/) y el informe técnico en [`docs/REPORT.md`](docs/REPORT.md).
+
+```
+Audio ─► AudioProcessor ─► AnomalyDetector (audio) ─► audio_score ┐
+                                                                  ├─► Calibración ─► Fusión ─► combined_score
+Video ─► VideoFeatureExtractor ─► VideoAnomalyDetector ─► video_score ┘     (percentil)   (weighted/max/and/or)
+```
+
+Capacidades nuevas:
+
+- **Detectores independientes** de audio y video (`src/detection/`, `src/vision_detection/`)
+  sobre una base común correcta (`BaseAnomalyDetector`).
+- **Sincronización temporal** A/V por timestamp (`src/sync/`): cada ventana de audio se
+  empareja con el frame más cercano en el tiempo (no "el último frame").
+- **Calibración por percentiles** + **fusión configurable** (`src/fusion/`): Weighted
+  Average / Maximum / AND / OR, con `dominant_modality`.
+- **Refits sensibles a drift**, **snapshots de modelos** (auditoría) y **explicabilidad**
+  por z-score (`top_audio_features`/`top_video_features`).
+- **Doble horizonte** (modelo rápido/lento) opt-in vía `ENABLE_SLOW_MODELS`.
+
+Compatibilidad hacia atrás: el esquema de eventos migra solo (columnas nuevas nullable)
+y la decisión de gating sigue la ruta de audio establecida.
+
+---
+
 ## Arquitectura general
 
 El sistema corre como **tres procesos Python independientes** que se comunican via HTTP:
@@ -564,20 +594,27 @@ Para detener: `Ctrl+C`
 
 ```bash
 poetry run pytest -v
-# 198 tests, ~4s
+# 240 tests, ~9s
 ```
 
 ### Ejecutar por módulo
 
 ```bash
-poetry run pytest tests/test_dsp.py -v        # 21 tests — DSP features
-poetry run pytest tests/test_detection.py -v  # 22 tests — Isolation Forest + PCA + C2ST drift
-poetry run pytest tests/test_storage.py -v    # 36 tests — FAISS, SQLite, EventStore
-poetry run pytest tests/test_api.py -v        # 34 tests — FastAPI endpoints + WebSocket
-poetry run pytest tests/test_embeddings.py -v # 19 tests — encoders multimodales (mockeados)
-poetry run pytest tests/test_vision.py -v     # 34 tests — MOG2, IoU, temporal weights, box merge
-poetry run pytest tests/test_dashboard.py -v  # 16 tests — APIClient + dashboard pages
-poetry run pytest tests/test_pipeline.py -v   #  6 tests — pipeline orchestration
+poetry run pytest tests/test_dsp.py -v             # 21 tests — DSP features
+poetry run pytest tests/test_detection.py -v       # 26 tests — Isolation Forest + PCA + C2ST drift
+poetry run pytest tests/test_base_detector.py -v   #  9 tests — BaseAnomalyDetector (C1/C2/H1/H6 fixes)
+poetry run pytest tests/test_storage.py -v         # 36 tests — FAISS, SQLite, EventStore
+poetry run pytest tests/test_schema_migration.py -v#  2 tests — migración de esquema compat
+poetry run pytest tests/test_api.py -v             # 34 tests — FastAPI endpoints + WebSocket
+poetry run pytest tests/test_embeddings.py -v      # 19 tests — encoders multimodales (mockeados)
+poetry run pytest tests/test_vision.py -v          # 34 tests — MOG2, IoU, temporal weights, box merge
+poetry run pytest tests/test_video_detection.py -v #  6 tests — detector de video (sin PCA)
+poetry run pytest tests/test_sync.py -v            #  8 tests — alineación temporal A/V
+poetry run pytest tests/test_calibration.py -v     #  4 tests — calibración por percentiles
+poetry run pytest tests/test_fusion.py -v          #  9 tests — estrategias de fusión
+poetry run pytest tests/test_drift_refit.py -v     #  6 tests — drift-aware refit, snapshots, explicabilidad
+poetry run pytest tests/test_dashboard.py -v       # 20 tests — APIClient + dashboard pages
+poetry run pytest tests/test_pipeline.py -v        #  6 tests — pipeline orchestration
 ```
 
 Todos los tests usan datos simulados (arrays numpy sintéticos, frames aleatorios, modelos mockeados). No requieren micrófono, cámara ni modelos descargados.
