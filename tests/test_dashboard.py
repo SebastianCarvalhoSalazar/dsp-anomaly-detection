@@ -249,6 +249,35 @@ def test_reset_detector_calls_correct_url():
     assert "http://testserver/internal/reset-detector" in mock_post.call_args[0][0]
 
 
+# ---------------------------------------------------------------------------
+# set_fusion_config / get_fusion_config
+# ---------------------------------------------------------------------------
+
+def test_set_fusion_config_posts_payload():
+    with patch("src.dashboard.api_client.httpx.post") as mock_post:
+        mock_post.return_value = _mock_response({"ok": True})
+        client = APIClient(base_url="http://testserver")
+        client.set_fusion_config(strategy="max", audio_weight=0.3, gates=True)
+
+    assert "http://testserver/internal/fusion-config" in mock_post.call_args[0][0]
+    assert mock_post.call_args[1]["json"] == {
+        "strategy": "max",
+        "audio_weight": 0.3,
+        "gates": True,
+    }
+
+
+def test_get_fusion_config_calls_correct_url():
+    cfg = {"strategy": "weighted", "audio_weight": 0.5, "gates": False}
+    with patch("src.dashboard.api_client.httpx.get") as mock_get:
+        mock_get.return_value = _mock_response(cfg)
+        client = APIClient(base_url="http://testserver")
+        result = client.get_fusion_config()
+
+    assert "http://testserver/internal/fusion-config" in mock_get.call_args[0][0]
+    assert result == cfg
+
+
 # -------------------------------------------------------------------
 # Live monitor chart helpers
 # -------------------------------------------------------------------
