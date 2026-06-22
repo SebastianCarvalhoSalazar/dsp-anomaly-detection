@@ -95,6 +95,17 @@ class EventStore:
                 f"event_dir '{event_dir}' is outside the configured events directory '{root}'"
             )
 
+    def safe_event_dir(self, stored: str) -> Path:
+        """Validate a DB-stored event_dir and return it as an absolute path.
+
+        Guards the file-streaming endpoints against path traversal (H2): a
+        row whose ``event_dir`` resolves outside the configured events
+        directory raises ``ValueError`` instead of serving an arbitrary file.
+        """
+        event_dir = Path(stored)
+        self._validate_event_dir(event_dir)
+        return event_dir.resolve()
+
     def load_audio(self, event_dir: Path) -> tuple[np.ndarray, int]:
         """Load audio.wav. Returns (samples, sample_rate)."""
         self._validate_event_dir(event_dir)

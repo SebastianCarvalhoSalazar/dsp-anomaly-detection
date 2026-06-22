@@ -62,16 +62,25 @@ async def get_event(
     return _event_to_response(event)
 
 
+def _safe_dir(event_store: EventStore, event: AnomalyEvent) -> Path:
+    """Resolve+validate the event's directory (H2). 404 on traversal/bad path."""
+    try:
+        return event_store.safe_event_dir(event.event_dir)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Event artifacts unavailable")
+
+
 @router.get("/{event_id}/audio")
 async def get_audio(
     event_id: int,
     db: Database = Depends(get_db),
+    event_store: EventStore = Depends(get_event_store),
 ) -> FileResponse:
     """Stream the audio.wav file for an event."""
     event = await anyio.to_thread.run_sync(lambda: db.get_event(event_id))
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
-    audio_path = Path(event.event_dir) / "audio.wav"
+    audio_path = _safe_dir(event_store, event) / "audio.wav"
     if not audio_path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found")
     return FileResponse(str(audio_path), media_type="audio/wav")
@@ -81,12 +90,13 @@ async def get_audio(
 async def get_frame(
     event_id: int,
     db: Database = Depends(get_db),
+    event_store: EventStore = Depends(get_event_store),
 ) -> FileResponse:
     """Stream the frame.jpg file for an event."""
     event = await anyio.to_thread.run_sync(lambda: db.get_event(event_id))
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
-    frame_path = Path(event.event_dir) / "frame.jpg"
+    frame_path = _safe_dir(event_store, event) / "frame.jpg"
     if not frame_path.exists():
         raise HTTPException(status_code=404, detail="Frame not found")
     return FileResponse(str(frame_path), media_type="image/jpeg")
@@ -96,6 +106,7 @@ async def get_frame(
 async def get_annotated_frame(
     event_id: int,
     db: Database = Depends(get_db),
+    event_store: EventStore = Depends(get_event_store),
 ) -> Response:
     """Return the event frame with bounding boxes drawn on it.
 
@@ -111,7 +122,7 @@ async def get_annotated_frame(
         raise HTTPException(
             status_code=404, detail="Event not found"
         )
-    frame_path = Path(event.event_dir) / "frame.jpg"
+    frame_path = _safe_dir(event_store, event) / "frame.jpg"
     if not frame_path.exists():
         raise HTTPException(
             status_code=404, detail="Frame not found"
@@ -194,17 +205,20 @@ async def delete_event(
     event_id: int,
     db: Database = Depends(get_db),
     event_store: EventStore = Depends(get_event_store),
+    faiss_store: FAISSStore = Depends(get_faiss_store),
 ) -> None:
-    """Delete a single event: removes the DB row and filesystem directory.
+    """Delete a single event: removes the DB row, FAISS vector and filesystem dir.
 
-    The FAISS entry for this event becomes orphaned but is harmless — the
-    search router already skips FAISS IDs with no matching DB row.
+    The FAISS vector is removed by its explicit ID (C3), so no orphan is left.
     """
     event = await anyio.to_thread.run_sync(lambda: db.get_event(event_id))
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
     event_dir = Path(event.event_dir)
+    faiss_id = event.faiss_index_id
     await anyio.to_thread.run_sync(lambda: db.delete_event(event_id))
+    if faiss_id is not None:
+        await anyio.to_thread.run_sync(lambda: faiss_store.remove(faiss_id))
     await anyio.to_thread.run_sync(lambda: event_store.delete_event(event_dir))
 
 

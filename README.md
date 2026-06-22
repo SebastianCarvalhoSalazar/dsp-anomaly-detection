@@ -718,11 +718,11 @@ En macOS, PyTorch y OpenCV ambos linkan contra el framework Accelerate/OpenMP. C
 |---|---|---|
 | Sin GPU | Todo corre en CPU por defecto | Cambiar `device='cuda'` en `EmbeddingConfig` si hay GPU disponible |
 | FAISS no distribuido | Índice en un solo archivo local | Migrar a Qdrant para escalado horizontal |
-| Integridad FAISS↔SQLite cross-proceso | IDs posicionales y escritura no atómica del índice entre pipeline y API (hallazgos C3/C4) | `IndexIDMap2` con IDs = PK de SQLite + escritura atómica / file-lock |
-| Fusión no decide el gating | El `combined_score` se calibra/expone pero el gating de eventos sigue la ruta de audio | Promover la fusión a decisión detrás de un flag, midiendo FP/FN ([ADR-0005](docs/adr/0005-configurable-fusion-strategies.md)) |
 | Source correlation heurística | `source_score` usa IoU temporal + área ratio; no hay beamforming real | Audio-based localization con array de micrófonos |
+| Validar fusión como gating en datos reales | El gating por fusión existe (`FUSION_GATES_DECISION`) pero está off por defecto | Medir FP/FN con datos etiquetados antes de activarlo por defecto |
 
-> **Resuelto en v0.3:** la sincronización audio-video por timestamp ([ADR-0003](docs/adr/0003-timestamp-based-av-synchronization.md)) y el `motion_energy` acotado a `[0,1]` ya no son limitaciones. El detalle completo de riesgos y trabajo futuro está en [`docs/REPORT.md`](docs/REPORT.md).
+> **Resuelto en v0.3:** sincronización audio-video por timestamp ([ADR-0003](docs/adr/0003-timestamp-based-av-synchronization.md)) y `motion_energy` acotado a `[0,1]`.
+> **Resuelto en v0.3.1:** integridad FAISS↔SQLite cross-proceso (`IndexIDMap2` con IDs = PK + escritura atómica + file-lock; hallazgos C3/C4), path traversal en endpoints de streaming (H2), rutas de evento absolutas (H3), y gating por fusión disponible tras flag. El detalle de riesgos y trabajo futuro está en [`docs/REPORT.md`](docs/REPORT.md).
 
 ---
 
