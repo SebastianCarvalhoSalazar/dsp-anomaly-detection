@@ -1,0 +1,74 @@
+docs/adr/0007-dual-horizon-fast-slow-models.md
+  s_82d54c3d01e175::t_70b4bb44fc9d5b 1-52
+src/detection/config.py
+  s_82d54c3d01e175::t_22eeea5dc89514 61-62,64-73
+tests/test_detection.py
+  s_82d54c3d01e175::t_526ffa15ecdddb 443
+src/detection/detector.py
+  s_82d54c3d01e175::t_5524f3f9763242 16
+  s_82d54c3d01e175::t_b42861fb6d0bec 18
+  s_82d54c3d01e175::t_afa5fda87b5673 40,42-46
+src/detection/base.py
+  s_82d54c3d01e175::t_7e87a804b11ea4 476
+  s_82d54c3d01e175::t_d21aa8cb228e79 251-252
+  s_82d54c3d01e175::t_d9e9a89c32d728 406-407
+  s_82d54c3d01e175::t_6e360a9c7707e3 439
+  s_82d54c3d01e175::t_1cae650c94f7fd 624,627-656,658,660-665
+  s_82d54c3d01e175::t_3e66724157a5de 116,120
+  s_82d54c3d01e175::t_d5aefef953fe59 657,659
+  s_82d54c3d01e175::t_387086850904f4 31,45,48
+  s_82d54c3d01e175::t_aafaf8eafc9c85 79-87
+  s_82d54c3d01e175::t_47180560aef275 159-161
+  s_82d54c3d01e175::t_1f755d1941592b 214,219-230,232,237
+  s_82d54c3d01e175::t_9416e9d437470c 378
+src/api/schemas.py
+  s_82d54c3d01e175::t_2fc87e1dec9675 47
+src/detection/__init__.py
+  s_82d54c3d01e175::t_ebe3ce0cf348eb 1,4,7-13
+src/dashboard/pages/live_monitor.py
+  s_82d54c3d01e175::t_1eae9295a8256e 390-407
+src/detection/snapshots.py
+  s_82d54c3d01e175::t_8656737e9d4dcc 1-80
+src/vision_detection/detector.py
+  s_82d54c3d01e175::t_109c48259b66a6 21
+  s_82d54c3d01e175::t_0576558472e6ae 42-46,50
+docs/adr/0010-explainability-via-zscore-baseline.md
+  s_82d54c3d01e175::t_613ec8ff92a7f3 1-47
+docs/adr/0008-drift-aware-adaptive-refit-policy.md
+  s_82d54c3d01e175::t_23e01b17a3e9ce 1-48
+tests/test_drift_refit.py
+  s_82d54c3d01e175::t_dfebff5f74f511 35-50,52-64
+  s_82d54c3d01e175::t_73a7ae45e561b2 1-34,51,65-110
+docs/adr/README.md
+  s_82d54c3d01e175::t_27dd5008748309 22-25
+docs/adr/0009-model-snapshots-and-retention.md
+  s_82d54c3d01e175::t_8332b76846f327 1-47
+src/pipeline.py
+  s_82d54c3d01e175::t_a20af5e992bdd8 361
+  s_82d54c3d01e175::t_88432257744aaf 432,437-438,440,462-472
+  s_82d54c3d01e175::t_ca639f06c15822 214-216
+  s_82d54c3d01e175::t_684bdc83b8ab5d 91-93,101-125
+  s_82d54c3d01e175::t_21e30480476a73 331,339
+  s_82d54c3d01e175::t_138810f937eb32 30
+  s_82d54c3d01e175::t_a9868586f63b9a 62-64,68-70
+  s_82d54c3d01e175::t_cceed4164c81c8 198-200
+  s_82d54c3d01e175::t_c41cc2b24ed8d4 258,261-262,267-276,284-302
+  s_82d54c3d01e175::t_8163b3f6b3df7b 350
+  s_82d54c3d01e175::t_894ef7fdc71e0d 402-407
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "cdb50fa046e03030ed9edc55b4a81ea1b28e1764",
+  "prompts": {},
+  "sessions": {
+    "s_82d54c3d01e175": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6c2db251-c75e-47a9-9c9b-429f1fc63f54",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Sebastian Carvalho <sebastian.carvalho@mercadolibre.com.co>"
+    }
+  }
+}
