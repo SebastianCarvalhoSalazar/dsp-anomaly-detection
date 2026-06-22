@@ -1,0 +1,45 @@
+tests/test_pipeline.py
+  s_82d54c3d01e175::t_714cd7add8e0f9 101-148
+src/dashboard/pages/live_monitor.py
+  s_82d54c3d01e175::t_02dec31ab441cc 346-385,387
+tests/test_dashboard.py
+  s_82d54c3d01e175::t_a094d2321402ae 252-280
+docs/adr/README.md
+  s_82d54c3d01e175::t_cf10d49f4947a7 27
+tests/test_api.py
+  s_82d54c3d01e175::t_bd9ac2fc25c89b 86-123
+src/dashboard/api_client.py
+  s_82d54c3d01e175::t_977e831d8ca1e5 110-134
+src/api/main.py
+  s_82d54c3d01e175::t_b6fe95bffdf06b 42-47
+src/api/routers/websocket.py
+  s_82d54c3d01e175::t_82bbc1f1d4d27f 8
+  s_82d54c3d01e175::t_58fb85289b3fc0 10-11
+  s_82d54c3d01e175::t_0971902039294b 78-110
+docs/adr/0012-dashboard-pipeline-live-control-channel.md
+  s_82d54c3d01e175::t_981061912d4617 1-63
+src/api/schemas.py
+  s_82d54c3d01e175::t_4719e9e59146c8 63-72
+src/pipeline.py
+  s_82d54c3d01e175::t_35628e666b2b7a 296
+  s_82d54c3d01e175::t_4f949f12f17b6a 33
+  s_82d54c3d01e175::t_684457298fb06f 235-277
+  s_82d54c3d01e175::t_f262f2f2820337 45
+  s_82d54c3d01e175::t_a8e15d043ccfe3 107-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "2c63f0bd8426af1a1a55b73f33367f5f5453ab02",
+  "prompts": {},
+  "sessions": {
+    "s_82d54c3d01e175": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6c2db251-c75e-47a9-9c9b-429f1fc63f54",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Sebastian Carvalho <sebastian.carvalho@mercadolibre.com.co>"
+    }
+  }
+}
