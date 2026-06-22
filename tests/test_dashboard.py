@@ -278,6 +278,52 @@ def test_get_fusion_config_calls_correct_url():
     assert result == cfg
 
 
+# ---------------------------------------------------------------------------
+# Fusion controls persistence across page navigation
+# ---------------------------------------------------------------------------
+
+def test_restore_fusion_state_seeds_defaults_when_empty():
+    from src.dashboard.pages.live_monitor import restore_fusion_state
+
+    ss: dict = {}
+    persist = restore_fusion_state(ss)
+    assert persist == {"strategy": "weighted", "audio_weight": 0.5, "gates": False}
+    assert ss["fusion_strategy"] == "weighted"
+    assert ss["audio_weight"] == 0.5
+    assert ss["fusion_gates"] is False
+
+
+def test_fusion_state_survives_simulated_page_switch():
+    from src.dashboard.pages.live_monitor import (
+        persist_fusion_state,
+        restore_fusion_state,
+    )
+
+    ss: dict = {}
+    restore_fusion_state(ss)
+    # User changes the controls; mirror them.
+    persist_fusion_state(ss, strategy="max", audio_weight=0.8, gates=True)
+
+    # Simulate navigating away: Streamlit garbage-collects the widget keys.
+    for widget_key in ("fusion_strategy", "audio_weight", "fusion_gates"):
+        del ss[widget_key]
+
+    # Returning to the page re-seeds the widgets from the persistent mirror.
+    restore_fusion_state(ss)
+    assert ss["fusion_strategy"] == "max"
+    assert ss["audio_weight"] == 0.8
+    assert ss["fusion_gates"] is True
+
+
+def test_persist_fusion_state_updates_mirror():
+    from src.dashboard.pages.live_monitor import persist_fusion_state
+
+    ss: dict = {}
+    persist = persist_fusion_state(ss, strategy="or", audio_weight=0.25, gates=True)
+    assert persist == {"strategy": "or", "audio_weight": 0.25, "gates": True}
+    assert ss["_fusion_persist"]["strategy"] == "or"
+
+
 # -------------------------------------------------------------------
 # Live monitor chart helpers
 # -------------------------------------------------------------------

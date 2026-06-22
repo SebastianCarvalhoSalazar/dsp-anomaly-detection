@@ -32,6 +32,49 @@ _WS_URL = (
 )
 _HISTORY = 256
 
+# Fusion controls must survive page navigation. Streamlit garbage-collects a
+# widget's keyed state when that widget stops rendering (e.g. you switch to
+# another page), so the controls would reset to their defaults on return. We
+# mirror the values into a NON-widget key (never GC'd) and re-seed the widget
+# keys from it whenever they are missing.
+_FUSION_PERSIST_KEY = "_fusion_persist"
+_FUSION_DEFAULTS = {"strategy": "weighted", "audio_weight": 0.5, "gates": False}
+# (widget key, persisted key) pairs
+_FUSION_WIDGETS = (
+    ("fusion_strategy", "strategy"),
+    ("audio_weight", "audio_weight"),
+    ("fusion_gates", "gates"),
+)
+
+
+def restore_fusion_state(session_state) -> dict:
+    """Seed the fusion widget keys from the persistent mirror.
+
+    Returns the persistent dict. Called before the widgets are created so that,
+    after a page switch wiped the widget-key state, the widgets re-initialise
+    to the last chosen values instead of the defaults.
+    """
+    persist = session_state.setdefault(_FUSION_PERSIST_KEY, dict(_FUSION_DEFAULTS))
+    for widget_key, persist_key in _FUSION_WIDGETS:
+        if widget_key not in session_state:
+            session_state[widget_key] = persist[persist_key]
+    return persist
+
+
+def persist_fusion_state(
+    session_state, strategy: str, audio_weight: float, gates: bool
+) -> dict:
+    """Mirror the current widget values into the persistent (non-widget) key."""
+    persist = session_state.setdefault(_FUSION_PERSIST_KEY, dict(_FUSION_DEFAULTS))
+    persist.update(
+        {
+            "strategy": strategy,
+            "audio_weight": float(audio_weight),
+            "gates": bool(gates),
+        }
+    )
+    return persist
+
 
 def _ws_listener(msg_queue: queue.Queue, stop_event: threading.Event) -> None:
     try:
@@ -343,6 +386,9 @@ def render(client: APIClient) -> None:
       Fusión multimodal
     </div>
     """)
+    # Re-seed the widget keys from the persistent mirror (survives page nav).
+    restore_fusion_state(st.session_state)
+
     cc1, cc2, cc3 = st.columns([2, 2, 2])
     strategy_name = cc1.selectbox(
         "Estrategia de fusión",
@@ -357,17 +403,19 @@ def render(client: APIClient) -> None:
     )
     audio_weight = cc2.slider(
         "Audio weight",
-        min_value=0.0, max_value=1.0, value=0.5, step=0.05,
+        min_value=0.0, max_value=1.0, step=0.05,
         key="audio_weight",
         help="Video weight = 1 − audio weight",
     )
     gates = cc3.toggle(
         "Fusión decide anomalías",
-        value=False,
         key="fusion_gates",
         help="Si está activo, el combined_score decide el gating en el pipeline "
              "(en vez de solo audio).",
     )
+
+    # Mirror the current values so they persist across page navigation.
+    persist_fusion_state(st.session_state, strategy_name, audio_weight, gates)
 
     # Push the selection to the pipeline whenever it changes — these controls
     # now govern the live pipeline, not just this view.
