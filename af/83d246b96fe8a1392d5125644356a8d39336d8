@@ -1,0 +1,22 @@
+CLAUDE.md
+  s_82d54c3d01e175::t_4a970a32710329 121-131
+README.md
+  s_82d54c3d01e175::t_d966ba408a93b6 729-787
+  s_82d54c3d01e175::t_8d87d902aec44c 721-722,724-725
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "af83d246b96fe8a1392d5125644356a8d39336d8",
+  "prompts": {},
+  "sessions": {
+    "s_82d54c3d01e175": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6c2db251-c75e-47a9-9c9b-429f1fc63f54",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Sebastian Carvalho <sebastian.carvalho@mercadolibre.com.co>"
+    }
+  }
+}
