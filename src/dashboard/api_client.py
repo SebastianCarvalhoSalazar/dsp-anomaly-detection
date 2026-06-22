@@ -107,3 +107,28 @@ class APIClient:
         """Signal the pipeline to reset its AnomalyDetector (restart warmup)."""
         resp = httpx.post(f"{self._base_url}/internal/reset-detector", timeout=5.0)
         resp.raise_for_status()
+
+    def set_fusion_config(
+        self,
+        strategy: str,
+        audio_weight: float,
+        gates: bool,
+    ) -> dict:
+        """Push the live fusion config to the pipeline (strategy, weight, gating)."""
+        resp = httpx.post(
+            f"{self._base_url}/internal/fusion-config",
+            json={
+                "strategy": strategy,
+                "audio_weight": audio_weight,
+                "gates": gates,
+            },
+            timeout=5.0,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_fusion_config(self) -> dict:
+        """Fetch the current live fusion config."""
+        resp = httpx.get(f"{self._base_url}/internal/fusion-config", timeout=5.0)
+        resp.raise_for_status()
+        return resp.json()

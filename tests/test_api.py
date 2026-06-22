@@ -83,6 +83,44 @@ def test_list_events_empty(client):
     assert resp.json() == []
 
 
+# ---------------------------------------------------------------------------
+# Internal: live fusion config (dashboard → pipeline control channel)
+# ---------------------------------------------------------------------------
+
+def test_fusion_config_default(client):
+    resp = client.get("/internal/fusion-config")
+    assert resp.status_code == 200
+    cfg = resp.json()
+    assert cfg == {"strategy": "weighted", "audio_weight": 0.5, "gates": False}
+
+
+def test_fusion_config_set_and_get(client):
+    resp = client.post(
+        "/internal/fusion-config",
+        json={"strategy": "max", "audio_weight": 0.3, "gates": True},
+    )
+    assert resp.status_code == 200
+    # GET reflects the new config.
+    cfg = client.get("/internal/fusion-config").json()
+    assert cfg == {"strategy": "max", "audio_weight": 0.3, "gates": True}
+
+
+def test_fusion_config_clamps_weight(client):
+    client.post(
+        "/internal/fusion-config",
+        json={"strategy": "weighted", "audio_weight": 5.0, "gates": False},
+    )
+    assert client.get("/internal/fusion-config").json()["audio_weight"] == 1.0
+
+
+def test_fusion_config_rejects_unknown_strategy(client):
+    resp = client.post(
+        "/internal/fusion-config",
+        json={"strategy": "bogus", "audio_weight": 0.5, "gates": False},
+    )
+    assert resp.status_code == 422
+
+
 def test_list_events_returns_saved(client, tmp_stores, tmp_path):
     db, faiss_store, event_store = tmp_stores
     # Re-create client with the same stores to share state

@@ -39,6 +39,12 @@ def create_app(
         application.state.db.init()
         application.state.faiss_store.init()
         application.state.detector_reset_pending = False
+        # Live fusion config the dashboard sets and the pipeline polls.
+        application.state.fusion_config = {
+            "strategy": "weighted",
+            "audio_weight": 0.5,
+            "gates": False,
+        }
 
         # Pre-load Wav2Vec2 + DINOv2 in a background thread so the first
         # similarity-search request does not block for ~60 s.
