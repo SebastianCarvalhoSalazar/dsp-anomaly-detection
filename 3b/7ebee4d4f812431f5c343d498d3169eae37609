@@ -1,0 +1,158 @@
+web/src/lib/ringBuffer.ts
+  s_38f39133cde13b::t_5a3d5a2ecb8b4a 1-27
+web/src/api/mediaUrls.ts
+  s_38f39133cde13b::t_9d991ece791cf6 1-6
+web/src/components/common/MetricTile.tsx
+  s_38f39133cde13b::t_017885f0b79c4e 1-16
+web/.gitignore
+  s_38f39133cde13b::t_c7c11886a321da 1-9
+web/src/pages/EventFeed.tsx
+  s_38f39133cde13b::t_b52748175ed747 1-122
+web/src/hooks/useAnomalyStream.test.ts
+  s_38f39133cde13b::t_43d1e456c2a1c2 1-50
+web/src/layout/NavBar.tsx
+  s_38f39133cde13b::t_ba3407f363bf2d 1-53
+web/src/lib/status.test.ts
+  s_38f39133cde13b::t_74ca12b3eea1fa 1-15
+web/src/components/common/Card.tsx
+  s_38f39133cde13b::t_711caa1c7c4d3c 1-21
+web/src/components/common/ScoreCard.tsx
+  s_38f39133cde13b::t_9ac712e32c73f7 1-31
+web/src/hooks/useReducedMotion.ts
+  s_38f39133cde13b::t_400088766740a2 1-14
+web/tsconfig.json
+  s_38f39133cde13b::t_09a004c13df9d3 3,5
+  s_38f39133cde13b::t_28af63486b0481 1-2,4,6-28,30
+  s_38f39133cde13b::t_c813cbba300e95 29
+web/src/styles/index.css
+  s_38f39133cde13b::t_986df49506ae2f 1-41
+web/src/components/common/Media.tsx
+  s_38f39133cde13b::t_e1cfbb2ba637cb 1-31
+web/src/components/common/ConnectionIndicator.tsx
+  s_38f39133cde13b::t_dcf5c6dc678c2d 1-35
+web/src/main.tsx
+  s_38f39133cde13b::t_bf9ffe0b298181 1-30
+web/src/components/events/EventCard.tsx
+  s_38f39133cde13b::t_14c0e564ae7f39 1-50
+web/src/lib/kde.ts
+  s_38f39133cde13b::t_3b013d30d510a3 1-20
+web/src/pages/LiveMonitor.tsx
+  s_38f39133cde13b::t_3106512a9c3190 1-141
+web/src/components/similarity/SimilarityResultCard.tsx
+  s_38f39133cde13b::t_71e48afa647458 1-30
+web/src/vite-env.d.ts
+  s_38f39133cde13b::t_a5802ee7fafd45 1-9
+web/src/lib/ringBuffer.test.ts
+  s_38f39133cde13b::t_6ace758fdd3f0c 1-24
+web/src/App.tsx
+  s_38f39133cde13b::t_671a2e0d652098 1-25
+web/src/lib/kde.test.ts
+  s_38f39133cde13b::t_314fc0ee17dc43 1-17
+web/src/components/common/ConfirmDialog.test.tsx
+  s_38f39133cde13b::t_dbd4d0e0c421e8 1-40
+web/README.md
+  s_38f39133cde13b::t_f71e697b63f581 1-53
+web/src/lib/constants.ts
+  s_38f39133cde13b::t_27c0d5d9e0b534 1-21
+web/src/lib/fusion.ts
+  s_38f39133cde13b::t_355896aa1f833e 1-67
+web/src/hooks/useEvents.ts
+  s_38f39133cde13b::t_c20cf20866dc02 1-41
+src/api/main.py
+  s_38f39133cde13b::t_1a03befe242712 10
+  s_38f39133cde13b::t_00df536094b45c 71-88
+web/src/components/charts/Heatmap.tsx
+  s_38f39133cde13b::t_765f0347b76c54 1-77
+web/src/components/common/ScoreCard.test.tsx
+  s_38f39133cde13b::t_65fd2aa7ee36e7 1-17
+web/src/api/types.ts
+  s_38f39133cde13b::t_4570e4275c7ffa 1-73
+web/src/components/common/States.tsx
+  s_38f39133cde13b::t_fcb21ae15d5548 1-40
+web/src/components/similarity/FileDropzone.tsx
+  s_38f39133cde13b::t_1623ad4a8c9ddd 1-60
+web/vite.config.ts
+  s_38f39133cde13b::t_8657e0cc6fd7bd 1-22
+web/src/hooks/useSimilarity.ts
+  s_38f39133cde13b::t_dfa525ce5f5978 1-20
+web/postcss.config.js
+  s_38f39133cde13b::t_92c12b2bf87e60 1-6
+web/tailwind.config.ts
+  s_38f39133cde13b::t_f0c3273b812470 1-34
+web/src/lib/fusion.test.ts
+  s_38f39133cde13b::t_46525b13d4477b 1-34
+web/src/components/events/EventFilters.tsx
+  s_38f39133cde13b::t_1d09a9e6ac97b1 1-71
+web/src/layout/AppShell.tsx
+  s_38f39133cde13b::t_18d2bd99820b54 1-20
+web/src/components/common/PageHeader.tsx
+  s_38f39133cde13b::t_5bed7fcbb569fa 1-21
+web/src/api/client.ts
+  s_38f39133cde13b::t_9f246d7863c80c 1-66
+web/package.json
+  s_38f39133cde13b::t_7278314c6f6ae1 9
+  s_38f39133cde13b::t_30580b4c1e148a 1-8,10-41
+web/src/api/queryKeys.ts
+  s_38f39133cde13b::t_2a2458146423d9 1-9
+web/src/pages/OfflineAnalysis.tsx
+  s_38f39133cde13b::t_f9e7ed286f93c5 1-130
+web/src/components/common/StatusChip.tsx
+  s_38f39133cde13b::t_f4125d7bf14a65 1-14
+web/src/components/charts/RealtimeChart.tsx
+  s_38f39133cde13b::t_c3b14a4c1f148c 1-60
+web/src/store/fusionDraftStore.ts
+  s_38f39133cde13b::t_649ae7e15763f4 1-31
+web/src/components/charts/RmsBarChart.tsx
+  s_38f39133cde13b::t_17d8d5ecd6c01f 1-20
+web/src/hooks/useFusionConfig.ts
+  s_38f39133cde13b::t_79bf89bacf7355 1-24
+web/src/components/charts/ImfChart.tsx
+  s_38f39133cde13b::t_e4e8a75fcdaf2c 1-31
+web/src/components/common/BBoxChip.tsx
+  s_38f39133cde13b::t_a8e8251b79d6f1 1-17
+web/src/api/endpoints.ts
+  s_38f39133cde13b::t_ffa3966f6250c6 1-61
+web/src/lib/format.ts
+  s_38f39133cde13b::t_d0fae959fa41f6 1-11
+web/src/components/fusion/FusionControls.tsx
+  s_38f39133cde13b::t_be143919ff51e4 1-112
+web/src/hooks/useOfflineAnalysis.ts
+  s_38f39133cde13b::t_05aa88980b9190 1-12
+web/vitest.setup.ts
+  s_38f39133cde13b::t_b0d4bc07af2688 1
+web/src/hooks/useAnomalyStream.tsx
+  s_38f39133cde13b::t_4570f67f1aa03b 88-94
+  s_38f39133cde13b::t_589db67de0917e 1-24,26-87,95-172,174-246
+  s_38f39133cde13b::t_bf636e1d354149 25
+  s_38f39133cde13b::t_f27aba7f8c6cd0 173
+web/.env.example
+  s_38f39133cde13b::t_127989c4481904 1-3
+web/src/components/common/ConfirmDialog.tsx
+  s_38f39133cde13b::t_6b75b1536b9808 1-80
+web/src/pages/SimilaritySearch.tsx
+  s_38f39133cde13b::t_a0532d22dc514d 1-198
+web/src/components/charts/KdeChart.tsx
+  s_38f39133cde13b::t_b69f0ebd0603fb 1-39
+web/src/lib/status.ts
+  s_38f39133cde13b::t_3c393d9d77608b 1-40
+web/index.html
+  s_38f39133cde13b::t_3c303979a5fd3f 1-12
+web/package-lock.json
+  s_38f39133cde13b::t_eae6baf2ed55ed 1-5171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.6",
+  "base_commit_sha": "3b7ebee4d4f812431f5c343d498d3169eae37609",
+  "prompts": {},
+  "sessions": {
+    "s_38f39133cde13b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4036af63-796d-4141-8ac0-9c18d90cb7b6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Sebastian Carvalho <sebastian.carvalho@mercadolibre.com.co>"
+    }
+  }
+}
