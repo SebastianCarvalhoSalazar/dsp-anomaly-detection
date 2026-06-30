@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from src.storage import Database, EventStore, FAISSStore, StorageConfig
 from src.api.routers import events, search, websocket
@@ -66,6 +67,24 @@ def create_app(
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    # CORS para el SPA desacoplado (web/). Orígenes configurables por env;
+    # en dev el dashboard React corre en http://localhost:5173 (Vite).
+    origins = [
+        o.strip()
+        for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+        if o.strip()
+    ]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
+
+    @app.get("/health", include_in_schema=False)
+    async def health() -> dict:
+        return {"status": "ok"}
 
     app.include_router(events.router)
     app.include_router(search.router)
