@@ -1,0 +1,29 @@
+docs/frontend-migration/03-contrato-api-frontend.md
+  s_38f39133cde13b::t_cdf6cb8e4babab 1-146
+docs/frontend-migration/02-plan-migracion-spa.md
+  s_38f39133cde13b::t_9b3c5d8d04d485 1-224
+docs/adr/0013-reemplazo-dashboard-streamlit-por-spa.md
+  s_38f39133cde13b::t_3466675a81c95b 1-74
+docs/frontend-migration/README.md
+  s_38f39133cde13b::t_554218f2197f7c 1-36
+docs/frontend-migration/01-analisis-dashboard-actual.md
+  s_38f39133cde13b::t_73a0bdaabd93cd 1-61
+docs/adr/README.md
+  s_38f39133cde13b::t_94d7dffd8c721c 28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.6",
+  "base_commit_sha": "e78ee1e815f6ffa223c1f21d660f8ca1b8f76e5b",
+  "prompts": {},
+  "sessions": {
+    "s_38f39133cde13b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4036af63-796d-4141-8ac0-9c18d90cb7b6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Sebastian Carvalho <sebastian.carvalho@mercadolibre.com.co>"
+    }
+  }
+}
