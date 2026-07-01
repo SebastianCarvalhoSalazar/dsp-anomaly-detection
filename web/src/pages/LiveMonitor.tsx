@@ -16,7 +16,7 @@ import { FusionControls } from '@/components/fusion/FusionControls';
 import { useAnomalyStream } from '@/hooks/useAnomalyStream';
 import { useResetDetector } from '@/hooks/useFusionConfig';
 import { fmtScore, fmtTimestamp } from '@/lib/format';
-import { deriveStatus } from '@/lib/status';
+import { deriveStatus, slowTileDisplay } from '@/lib/status';
 
 export default function LiveMonitor() {
   const stream = useAnomalyStream();
@@ -32,6 +32,9 @@ export default function LiveMonitor() {
   const topDrift = msg?.top_drift_features ?? [];
   const topAudio = msg?.top_audio_features ?? [];
   const topVideo = msg?.top_video_features ?? [];
+  const slowEnabled = msg?.slow_enabled ?? false;
+  const slowAudio = slowTileDisplay(slowEnabled, msg?.slow_audio_fitted ?? false, msg?.slow_audio_score ?? 0);
+  const slowVideo = slowTileDisplay(slowEnabled, msg?.slow_video_fitted ?? false, msg?.slow_video_score ?? 0);
 
   return (
     <>
@@ -98,9 +101,9 @@ export default function LiveMonitor() {
         <FusionControls audioScore={msg?.audio_score ?? 0} videoScore={msg?.video_score ?? 0} />
         <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
           <MetricTile label="Audio · rápido" value={fmtScore(msg?.fast_audio_score ?? 0)} />
-          <MetricTile label="Audio · lento" value={fmtScore(msg?.slow_audio_score ?? 0)} />
+          <MetricTile label="Audio · lento" value={slowAudio.text} valueClass={slowAudio.cls} />
           <MetricTile label="Video · rápido" value={fmtScore(msg?.fast_video_score ?? 0)} />
-          <MetricTile label="Video · lento" value={fmtScore(msg?.slow_video_score ?? 0)} />
+          <MetricTile label="Video · lento" value={slowVideo.text} valueClass={slowVideo.cls} />
         </div>
         {(topAudio.length > 0 || topVideo.length > 0) && (
           <p className="mt-2 font-mono text-xs text-muted">

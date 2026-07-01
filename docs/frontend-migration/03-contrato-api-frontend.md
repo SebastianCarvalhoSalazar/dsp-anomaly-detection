@@ -127,6 +127,9 @@ export interface AnomalyScoreMessage {
   slow_audio_score: number;
   fast_video_score: number;
   slow_video_score: number;
+  slow_enabled: boolean;        // detector lento activo (ENABLE_SLOW_MODELS)
+  slow_audio_fitted: boolean;   // el lento de audio ya pasó su warmup
+  slow_video_fitted: boolean;   // el lento de video ya pasó su warmup
   top_audio_features: string[];
   top_video_features: string[];
   dominant_modality: string;    // "audio" por defecto

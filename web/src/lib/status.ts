@@ -1,6 +1,21 @@
 import { ANOMALY_THRESHOLD } from './constants';
+import { fmtScore } from './format';
 
 export type DetectorStatus = 'warmup' | 'anomaly' | 'normal';
+
+/**
+ * Texto/color para un tile del detector lento, distinguiendo apagado vs
+ * calibrando vs con dato (evita el 0.000 ambiguo del warmup).
+ */
+export function slowTileDisplay(
+  enabled: boolean,
+  fitted: boolean,
+  value: number,
+): { text: string; cls: string } {
+  if (!enabled) return { text: '— off', cls: 'text-dim' };
+  if (!fitted) return { text: 'calibrando', cls: 'text-warning' };
+  return { text: fmtScore(value), cls: 'text-ink' };
+}
 
 export function deriveStatus(isFitted: boolean, isAnomaly: boolean): DetectorStatus {
   if (!isFitted) return 'warmup';

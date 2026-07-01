@@ -67,6 +67,9 @@ export interface AnomalyScoreMessage {
   slow_audio_score: number;
   fast_video_score: number;
   slow_video_score: number;
+  slow_enabled: boolean;
+  slow_audio_fitted: boolean;
+  slow_video_fitted: boolean;
   top_audio_features: string[];
   top_video_features: string[];
   dominant_modality: string;
