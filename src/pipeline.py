@@ -26,6 +26,15 @@ import json
 import httpx
 import numpy as np
 import sounddevice as sd
+from dotenv import load_dotenv
+
+# Carga variables desde el .env de la raíz del repo (si existe) para que
+# EVENTS_DIR, DB_PATH, CORS_ORIGINS, ENABLE_SLOW_MODELS, etc. surtan efecto sin
+# tener que exportarlas manualmente. Una variable ya presente en el entorno
+# tiene prioridad (load_dotenv no sobrescribe por defecto).
+from pathlib import Path as _Path
+
+load_dotenv(_Path(__file__).resolve().parent.parent / ".env")
 
 from src.detection import AnomalyDetector, DetectorConfig, SnapshotStore
 from src.dsp import AudioProcessor, DSPConfig
@@ -324,12 +333,16 @@ class Pipeline:
             # --- Dual horizon (Req 6): slow models, decision uses fast ----
             slow_audio = 0.0
             slow_video = 0.0
+            slow_audio_fitted = False
+            slow_video_fitted = False
             if self._enable_slow:
-                slow_audio = self.slow_detector.score(feature_vec).anomaly_score
+                _slow_a = self.slow_detector.score(feature_vec)
+                slow_audio = _slow_a.anomaly_score
+                slow_audio_fitted = _slow_a.is_fitted
                 if video_array is not None:
-                    slow_video = self.slow_video_detector.score(
-                        video_array
-                    ).anomaly_score
+                    _slow_v = self.slow_video_detector.score(video_array)
+                    slow_video = _slow_v.anomaly_score
+                    slow_video_fitted = _slow_v.is_fitted
 
             # --- Calibration + fusion -------------------------------------
             audio_cal = self.audio_calibrator.calibrate_and_update(
@@ -354,6 +367,9 @@ class Pipeline:
                 "slow_audio_score": slow_audio,
                 "fast_video_score": video_raw,
                 "slow_video_score": slow_video,
+                "slow_enabled": self._enable_slow,
+                "slow_audio_fitted": slow_audio_fitted,
+                "slow_video_fitted": slow_video_fitted,
                 "top_audio_features": top_audio,
                 "top_video_features": top_video,
             }
@@ -534,6 +550,9 @@ class Pipeline:
                 "slow_audio_score": round(mm.get("slow_audio_score", 0.0), 6),
                 "fast_video_score": round(mm.get("fast_video_score", 0.0), 6),
                 "slow_video_score": round(mm.get("slow_video_score", 0.0), 6),
+                "slow_enabled": mm.get("slow_enabled", False),
+                "slow_audio_fitted": mm.get("slow_audio_fitted", False),
+                "slow_video_fitted": mm.get("slow_video_fitted", False),
                 "top_audio_features": mm.get("top_audio_features", []),
                 "top_video_features": mm.get("top_video_features", []),
             }

@@ -25,6 +25,7 @@ fusión tardía** (audio + video) descrita en el plan
 | [0010](0010-explainability-via-zscore-baseline.md) | Explicabilidad por z-score vs baseline reciente | Aceptado | 3 |
 | [0011](0011-backward-compatible-event-schema-migration.md) | Migración de esquema de eventos compatible hacia atrás | Aceptado | 1 |
 | [0012](0012-dashboard-pipeline-live-control-channel.md) | Canal de control dashboard → pipeline en vivo | Aceptado | post-v0.3 |
+| [0013](0013-reemplazo-dashboard-streamlit-por-spa.md) | Reemplazo del dashboard Streamlit por un SPA (React + TS) | Aceptado | Frontend |
 
 ## Convenciones
 

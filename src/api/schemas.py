@@ -55,6 +55,11 @@ class AnomalyScoreMessage(BaseModel):
     slow_audio_score: float = 0.0
     fast_video_score: float = 0.0
     slow_video_score: float = 0.0
+    # Estado del detector lento (doble horizonte): permite al dashboard mostrar
+    # "calibrando" vs "apagado" en vez de un 0.0 ambiguo.
+    slow_enabled: bool = False
+    slow_audio_fitted: bool = False
+    slow_video_fitted: bool = False
     top_audio_features: list[str] = []
     top_video_features: list[str] = []
     dominant_modality: str = "audio"
