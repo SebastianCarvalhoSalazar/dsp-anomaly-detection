@@ -10,12 +10,17 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="mb-6 flex flex-col gap-3 rounded-2xl bg-gradient-to-br from-primary to-indigo-600 p-6 text-white sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-white/80">{subtitle}</p>}
+    <header className="mb-6 flex flex-col gap-3 border-b border-line pb-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex items-center gap-3">
+        <span className="h-9 w-1 rounded-sm bg-primary shadow-glow-primary" aria-hidden />
+        <div>
+          <h1 className="font-display text-2xl font-bold uppercase tracking-[0.06em] text-ink">
+            {title}
+          </h1>
+          {subtitle && <p className="mt-0.5 text-xs text-muted">{subtitle}</p>}
+        </div>
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {actions && <div className="flex items-center gap-3">{actions}</div>}
     </header>
   );
 }

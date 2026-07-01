@@ -67,7 +67,7 @@ function TabButton({
       aria-selected={active}
       onClick={onClick}
       className={`rounded-lg px-4 py-2 text-sm font-medium ${
-        active ? 'bg-primary text-white' : 'bg-surface text-muted hover:bg-bg'
+        active ? 'bg-primary font-semibold text-bg' : 'border border-line bg-surface text-muted hover:text-ink'
       }`}
     >
       {children}
@@ -107,7 +107,7 @@ function UploadMode({ k }: { k: number }) {
                 setFile(null);
               }}
               className={`rounded-lg px-3 py-1.5 text-sm ${
-                modality === m.value ? 'bg-primary text-white' : 'bg-bg text-muted'
+                modality === m.value ? 'bg-primary font-semibold text-bg' : 'border border-line bg-surface-2 text-muted'
               }`}
             >
               {m.icon} {m.label}
@@ -119,7 +119,7 @@ function UploadMode({ k }: { k: number }) {
           type="button"
           disabled={!file || search.isPending}
           onClick={() => file && search.mutate({ file, modality, k })}
-          className="mt-3 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="mt-3 rounded-md bg-primary px-4 py-2 text-sm font-semibold uppercase tracking-wide text-bg hover:brightness-110 disabled:opacity-50"
         >
           Buscar eventos similares
         </button>
@@ -176,7 +176,7 @@ function EventMode({ k }: { k: number }) {
         <button
           type="button"
           onClick={() => setRun(true)}
-          className="mt-3 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white"
+          className="mt-3 rounded-md bg-primary px-4 py-2 text-sm font-semibold uppercase tracking-wide text-bg hover:brightness-110"
         >
           Buscar eventos similares
         </button>

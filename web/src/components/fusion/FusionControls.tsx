@@ -13,6 +13,8 @@ function sameConfig(a: FusionConfig, b: FusionConfig): boolean {
   return a.strategy === b.strategy && a.audio_weight === b.audio_weight && a.gates === b.gates;
 }
 
+const labelCls = 'mb-1 block text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-muted';
+
 export function FusionControls({
   audioScore,
   videoScore,
@@ -26,7 +28,6 @@ export function FusionControls({
   const serverCfg = useFusionConfig();
   const setCfg = useSetFusionConfig();
 
-  // Hidratar el borrador desde el servidor una sola vez.
   const hydrated = useRef(false);
   useEffect(() => {
     if (!hydrated.current && serverCfg.data) {
@@ -35,7 +36,6 @@ export function FusionControls({
     }
   }, [serverCfg.data, hydrate]);
 
-  // Empujar al pipeline cuando cambian los controles (B5 sin acoplar src.fusion).
   const lastSent = useRef<FusionConfig | null>(null);
   useEffect(() => {
     const cfg: FusionConfig = { strategy, audio_weight, gates };
@@ -49,15 +49,15 @@ export function FusionControls({
   const preview = combine(strategy, audioScore, videoScore, audio_weight);
 
   return (
-    <section aria-label="Controles de fusión multimodal" className="space-y-3">
-      <SectionLabel>Fusión multimodal</SectionLabel>
+    <section aria-label="Controles de fusión multimodal" className="space-y-4">
+      <SectionLabel>Consola de fusión</SectionLabel>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <label className="text-sm">
-          <span className="mb-1 block font-medium text-muted">Estrategia</span>
+          <span className={labelCls}>Estrategia</span>
           <select
             value={strategy}
             onChange={(e) => setStrategy(e.target.value as FusionConfig['strategy'])}
-            className="w-full rounded-lg border border-line bg-surface px-3 py-2"
+            className="w-full rounded-md border border-line bg-surface-2 px-3 py-2 font-mono text-sm text-ink"
           >
             {FUSION_STRATEGIES.map((s) => (
               <option key={s.value} value={s.value}>
@@ -68,9 +68,7 @@ export function FusionControls({
         </label>
 
         <label className="text-sm">
-          <span className="mb-1 block font-medium text-muted">
-            Audio weight: {audio_weight.toFixed(2)}
-          </span>
+          <span className={labelCls}>Audio weight · {audio_weight.toFixed(2)}</span>
           <input
             type="range"
             min={0}
@@ -81,7 +79,7 @@ export function FusionControls({
             className="w-full accent-primary"
             disabled={strategy !== 'weighted'}
           />
-          <span className="text-xs text-muted">Video weight = 1 − audio weight</span>
+          <span className="font-mono text-[0.65rem] text-dim">video = 1 − audio</span>
         </label>
 
         <label className="flex cursor-pointer items-center gap-2 text-sm">
@@ -96,15 +94,15 @@ export function FusionControls({
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <MetricTile label="Audio score" value={fmtScore(audioScore)} />
-        <MetricTile label="Video score" value={fmtScore(videoScore)} />
-        <MetricTile label="Combined (preview)" value={fmtScore(preview.combinedScore)} />
+        <MetricTile label="Audio" value={fmtScore(audioScore)} valueClass="text-primary" />
+        <MetricTile label="Video" value={fmtScore(videoScore)} valueClass="text-primary" />
+        <MetricTile label="Combined · preview" value={fmtScore(preview.combinedScore)} />
         <MetricTile label="Dominante" value={DOMINANT_LABEL[preview.dominantModality]} />
       </div>
       {strategy === 'weighted' && (
-        <p className="text-xs text-muted">
-          Combined = {audio_weight.toFixed(2)}·audio + {(1 - audio_weight).toFixed(2)}·video
-          {'  '}· valor autoritativo desde el backend
+        <p className="font-mono text-[0.65rem] text-dim">
+          combined = {audio_weight.toFixed(2)}·audio + {(1 - audio_weight).toFixed(2)}·video ·
+          valor autoritativo desde el backend
         </p>
       )}
     </section>

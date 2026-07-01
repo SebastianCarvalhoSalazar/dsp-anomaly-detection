@@ -11,7 +11,7 @@ export interface ConfirmDialogProps {
   onCancel: () => void;
 }
 
-/** Modal accesible (role=alertdialog) para acciones destructivas (B6). */
+/** Modal accesible (role=alertdialog) para acciones destructivas. */
 export function ConfirmDialog({
   open,
   title,
@@ -38,7 +38,7 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
       onClick={onCancel}
     >
       <div
@@ -46,10 +46,13 @@ export function ConfirmDialog({
         aria-modal="true"
         aria-labelledby="confirm-title"
         aria-describedby="confirm-desc"
-        className="w-full max-w-md rounded-2xl bg-surface p-6 shadow-xl"
+        className="w-full max-w-md rounded-lg border border-line bg-surface p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="confirm-title" className="text-lg font-bold text-ink">
+        <h2
+          id="confirm-title"
+          className="font-display text-lg font-bold uppercase tracking-wide text-ink"
+        >
           {title}
         </h2>
         <p id="confirm-desc" className="mt-2 text-sm text-muted">
@@ -59,7 +62,7 @@ export function ConfirmDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg px-4 py-2 text-sm font-medium text-muted hover:bg-bg"
+            className="rounded-md px-4 py-2 text-sm font-medium text-muted hover:bg-white/5"
           >
             {cancelLabel}
           </button>
@@ -67,8 +70,8 @@ export function ConfirmDialog({
             ref={confirmRef}
             type="button"
             onClick={onConfirm}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${
-              danger ? 'bg-anomaly hover:bg-red-600' : 'bg-primary hover:bg-violet-700'
+            className={`rounded-md px-4 py-2 text-sm font-bold uppercase tracking-wide text-bg ${
+              danger ? 'bg-anomaly hover:brightness-110' : 'bg-primary hover:brightness-110'
             }`}
           >
             {confirmLabel}

@@ -61,7 +61,7 @@ export default function OfflineAnalysis() {
         <button
           type="button"
           onClick={() => setRun(true)}
-          className="mt-3 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white"
+          className="mt-3 rounded-md bg-primary px-4 py-2 text-sm font-semibold uppercase tracking-wide text-bg hover:brightness-110"
         >
           Ejecutar análisis
         </button>
@@ -92,7 +92,7 @@ export default function OfflineAnalysis() {
               aria-selected={tab === 'emd'}
               onClick={() => setTab('emd')}
               className={`rounded-lg px-4 py-2 text-sm font-medium ${
-                tab === 'emd' ? 'bg-primary text-white' : 'bg-surface text-muted'
+                tab === 'emd' ? 'bg-primary font-semibold text-bg' : 'border border-line bg-surface text-muted'
               }`}
             >
               📈 Descomposición EMD
@@ -103,7 +103,7 @@ export default function OfflineAnalysis() {
               aria-selected={tab === 'spec'}
               onClick={() => setTab('spec')}
               className={`rounded-lg px-4 py-2 text-sm font-medium ${
-                tab === 'spec' ? 'bg-primary text-white' : 'bg-surface text-muted'
+                tab === 'spec' ? 'bg-primary font-semibold text-bg' : 'border border-line bg-surface text-muted'
               }`}
             >
               🎨 Mel-Spectrogram

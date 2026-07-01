@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 html,
@@ -14,9 +14,41 @@ body,
 
 body {
   @apply bg-bg text-ink font-sans antialiased;
+  /* Rejilla técnica sutil + viñeta radial para dar atmósfera de consola. */
+  background-image:
+    radial-gradient(1200px 600px at 78% -10%, rgba(34, 211, 238, 0.06), transparent 60%),
+    radial-gradient(900px 500px at 0% 110%, rgba(52, 211, 153, 0.05), transparent 55%),
+    linear-gradient(rgba(30, 42, 58, 0.35) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 42, 58, 0.35) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    100% 100%,
+    44px 44px,
+    44px 44px;
+  background-attachment: fixed;
 }
 
-/* Respeta la preferencia del usuario por menos movimiento. */
+/* Números de telemetría: ancho fijo, no "saltan" al actualizar. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0e141d;
+}
+::-webkit-scrollbar-thumb {
+  background: #263548;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #33465e;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -27,7 +59,6 @@ body {
   }
 }
 
-/* Utilidad: contenido solo para lectores de pantalla. */
 .sr-only {
   position: absolute;
   width: 1px;

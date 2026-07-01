@@ -78,7 +78,8 @@ El sistema corre como **tres procesos Python independientes** que se comunican v
                               │ HTTP + WebSocket
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   PROCESO DASHBOARD (Streamlit)             │
+│            PROCESO DASHBOARD (SPA React · web/)            │
+│            (reemplaza al dashboard Streamlit)             │
 │                                                             │
 │  Live Monitor │ Event Feed │ Similarity Search │ EMD/Spec   │
 └─────────────────────────────────────────────────────────────┘
@@ -387,14 +388,58 @@ Base URL: `http://localhost:8000`
 | `POST` | `/internal/score` | Usado internamente por el pipeline para broadcast WS |
 | `POST` | `/internal/reset-detector` | Señaliza al pipeline que resetee su `AnomalyDetector` |
 | `GET` | `/internal/reset-pending` | Polling del pipeline: retorna `{"pending": bool}` y limpia el flag |
+| `POST` | `/internal/fusion-config` | Dashboard → pipeline: fija `strategy`/`audio_weight`/`gates` de fusión en vivo (422 si estrategia inválida) |
+| `GET` | `/internal/fusion-config` | Config de fusión actual `{strategy, audio_weight, gates}` |
+| `GET` | `/health` | Healthcheck: `{"status":"ok"}` |
 
 Documentación interactiva disponible en `http://localhost:8000/docs` (Swagger UI).
 
+**CORS:** habilitado vía `CORSMiddleware` para el SPA desacoplado. Orígenes permitidos por
+la variable `CORS_ORIGINS` (default `http://localhost:5173`, el dev server de Vite).
+
 ---
 
-## Dashboard Streamlit
+## Dashboard web (SPA React · Mission Control)
 
-Cuatro páginas accesibles desde el sidebar:
+A partir de la rama `feature/frontend-spa`, el dashboard principal es una **SPA
+desacoplada en React + TypeScript + Vite** en [`web/`](web/), que consume la API
+(REST + WebSocket) y reemplaza al dashboard Streamlit. Decisión:
+[ADR-0013](docs/adr/0013-reemplazo-dashboard-streamlit-por-spa.md); plan y contrato en
+[`docs/frontend-migration/`](docs/frontend-migration/).
+
+**Lenguaje visual "Mission Control":** tema oscuro de sala de control, tipografía técnica
+(Chakra Petch + JetBrains Mono), telemetría en mono tabular, traza tipo osciloscopio y un
+estado de sistema inequívoco (NOMINAL / CALIBRANDO / ANOMALÍA).
+
+Mejoras clave sobre Streamlit:
+
+- **Tiempo real event-driven** (`useAnomalyStream`): sin polling de página; WebSocket con
+  reconexión (backoff + jitter), heartbeat y detección de *staleness* → indicador de
+  conexión honesto (ya no "siempre conectado").
+- **Estado de fusión persistente** entre navegación (Zustand); estrategias de fusión
+  reimplementadas en TS (sin acoplar `src.fusion`); el `combined_score` del backend sigue
+  siendo la fuente autoritativa.
+- **Acciones destructivas con confirmación**, accesibilidad (WCAG AA, `prefers-reduced-motion`)
+  y diseño mobile-first.
+- Gráficos ligeros: **uPlot** (streaming) + **Recharts** (KDE / RMS / IMF / heatmap),
+  con *code-splitting* por ruta.
+
+```bash
+cd web
+cp .env.example .env        # VITE_API_BASE_URL=http://localhost:8000
+npm install
+npm run dev                 # http://localhost:5173
+```
+
+Requiere la API con CORS habilitado (`CORS_ORIGINS`). Detalle en [`web/README.md`](web/README.md).
+
+---
+
+## Dashboard Streamlit (legacy · en decomisión)
+
+> El dashboard Streamlit permanece operativo como referencia hasta confirmar la paridad del
+> SPA (fase F8 del plan de migración). Se eliminará junto con `streamlit`/`plotly` una vez
+> validado. Cuatro páginas accesibles desde el sidebar:
 
 ### Live Monitor
 - Indicadores en tiempo real: anomaly score, estado del detector, fase de calentamiento, **motion energy**, **Drift AUC** (C2ST: 0.5 = sin drift, 1.0 = drift total)
@@ -474,6 +519,18 @@ dsp-idea/
 │   │       ├── similarity_search.py
 │   │       └── offline_analysis.py
 │   └── pipeline.py            # Orquestador: loop principal audio+video+anomalía
+├── web/                       # Dashboard SPA (React + TS + Vite) — "Mission Control"
+│   ├── src/
+│   │   ├── api/               # cliente tipado (types, client, endpoints, queryKeys, mediaUrls)
+│   │   ├── hooks/             # useAnomalyStream (WS) + hooks TanStack Query
+│   │   ├── store/             # fusionDraftStore (Zustand, persistente)
+│   │   ├── lib/               # fusion, ringBuffer, kde, status, format, constants
+│   │   ├── components/        # charts/ · common/ · fusion/ · events/ · similarity/
+│   │   ├── pages/             # LiveMonitor · EventFeed · SimilaritySearch · OfflineAnalysis
+│   │   └── layout/            # AppShell, NavBar
+│   ├── package.json
+│   ├── vite.config.ts · tailwind.config.ts · tsconfig.json
+│   └── README.md
 ├── tests/
 │   ├── conftest.py            # OMP_NUM_THREADS=1 (fix segfault macOS)
 │   ├── test_dsp.py
@@ -529,7 +586,11 @@ EVENTS_DIR=./eventos      # directorio donde se guardan los eventos
 DB_PATH=./data/events.db  # base de datos SQLite
 FAISS_PATH=./data/faiss.index
 API_BASE_URL=http://localhost:8000
+CORS_ORIGINS=http://localhost:5173   # orígenes permitidos para el SPA (coma-separados)
 ```
+
+> El SPA usa su propia variable `VITE_API_BASE_URL` en `web/.env` (por defecto
+> `http://localhost:8000`).
 
 ### 3. Descargar modelos de HuggingFace (una sola vez)
 
@@ -564,13 +625,24 @@ curl http://localhost:8000/events/
 
 Documentación interactiva: `http://localhost:8000/docs`
 
-### Terminal 2 — Dashboard
+### Terminal 2 — Dashboard (SPA React · recomendado)
 
 ```bash
-poetry run streamlit run src/dashboard/app.py
+cd web
+cp .env.example .env        # VITE_API_BASE_URL=http://localhost:8000
+npm install
+npm run dev                 # http://localhost:5173
 ```
 
-Abre automáticamente `http://localhost:8501` en el navegador.
+Requiere que la API tenga `CORS_ORIGINS` incluyendo el origen del SPA (default
+`http://localhost:5173`).
+
+<details><summary>Alternativa legacy — dashboard Streamlit</summary>
+
+```bash
+poetry run streamlit run src/dashboard/app.py   # http://localhost:8501
+```
+</details>
 
 ### Terminal 3 — Pipeline (requiere micrófono y cámara)
 
@@ -661,9 +733,15 @@ EOF
 | DB | SQLAlchemy | ^2.0 | ORM sync para SQLite |
 | API | FastAPI | ^0.135 | REST + WebSocket |
 | API | Uvicorn | ^0.43 | Servidor ASGI |
-| Frontend | Streamlit | ^1.56 | Dashboard web |
-| Frontend | Plotly | ^6.6 | Gráficas interactivas (IMF, spectrogram) |
-| HTTP | httpx | — | Cliente sync en dashboard |
+| Frontend SPA | React + TypeScript | 18 / 5 | Dashboard desacoplado (`web/`) |
+| Frontend SPA | Vite | ^5 | Build y dev server del SPA |
+| Frontend SPA | Tailwind CSS | ^3 | Estilos (tema "Mission Control") |
+| Frontend SPA | TanStack Query | ^5 | Estado de servidor (REST) |
+| Frontend SPA | Zustand | ^4 | Estado de fusión (persistente) |
+| Frontend SPA | uPlot / Recharts | ^1 / ^2 | Gráficos realtime / estáticos |
+| Frontend SPA | Vitest + MSW | ^2 | Tests del SPA |
+| Frontend (legacy) | Streamlit + Plotly | ^1.56 / ^6.6 | Dashboard anterior (en decomisión) |
+| HTTP | httpx | — | Cliente sync en dashboard Streamlit |
 
 ---
 

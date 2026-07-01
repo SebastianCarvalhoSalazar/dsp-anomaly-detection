@@ -4,6 +4,10 @@ export interface FilterValues {
   sort: 'recent' | 'score';
 }
 
+const selectCls =
+  'rounded-md border border-line bg-surface-2 px-3 py-2 font-mono text-sm text-ink';
+const labelCls = 'mb-1 block text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-muted';
+
 export function EventFilters({
   values,
   onChange,
@@ -14,11 +18,9 @@ export function EventFilters({
   onClearAll: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-line bg-surface p-4">
+    <div className="flex flex-wrap items-end gap-4 rounded-lg border border-line bg-surface p-4 shadow-panel">
       <label className="text-sm">
-        <span className="mb-1 block font-medium text-muted">
-          Score mínimo: {values.minScore.toFixed(2)}
-        </span>
+        <span className={labelCls}>Score mínimo · {values.minScore.toFixed(2)}</span>
         <input
           type="range"
           min={0}
@@ -31,11 +33,11 @@ export function EventFilters({
       </label>
 
       <label className="text-sm">
-        <span className="mb-1 block font-medium text-muted">Mostrar</span>
+        <span className={labelCls}>Mostrar</span>
         <select
           value={values.limit}
           onChange={(e) => onChange({ limit: Number(e.target.value) })}
-          className="rounded-lg border border-line bg-surface px-3 py-2"
+          className={selectCls}
         >
           {[10, 25, 50, 100].map((n) => (
             <option key={n} value={n}>
@@ -46,11 +48,11 @@ export function EventFilters({
       </label>
 
       <label className="text-sm">
-        <span className="mb-1 block font-medium text-muted">Orden</span>
+        <span className={labelCls}>Orden</span>
         <select
           value={values.sort}
           onChange={(e) => onChange({ sort: e.target.value as FilterValues['sort'] })}
-          className="rounded-lg border border-line bg-surface px-3 py-2"
+          className={selectCls}
         >
           <option value="recent">Más recientes</option>
           <option value="score">Mayor score</option>
@@ -61,7 +63,7 @@ export function EventFilters({
         <button
           type="button"
           onClick={onClearAll}
-          className="rounded-lg border border-anomaly/40 px-3 py-2 text-sm font-medium text-anomaly hover:bg-red-50"
+          className="rounded-md border border-anomaly/40 px-3 py-2 text-sm font-semibold uppercase tracking-wide text-anomaly hover:bg-anomaly/10"
         >
           Borrar todo
         </button>

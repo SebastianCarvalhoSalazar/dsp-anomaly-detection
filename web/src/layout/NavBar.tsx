@@ -4,10 +4,10 @@ import { ConnectionIndicator } from '@/components/common/ConnectionIndicator';
 import { useAnomalyStream } from '@/hooks/useAnomalyStream';
 
 const LINKS = [
-  { to: '/', label: 'Monitor en vivo', icon: '📡', end: true },
-  { to: '/eventos', label: 'Eventos', icon: '🗂️', end: false },
-  { to: '/busqueda', label: 'Búsqueda', icon: '🔍', end: false },
-  { to: '/offline', label: 'Análisis offline', icon: '📊', end: false },
+  { to: '/', label: 'Monitor', code: 'LIVE', icon: '◉', end: true },
+  { to: '/eventos', label: 'Eventos', code: 'EVTS', icon: '▤', end: false },
+  { to: '/busqueda', label: 'Búsqueda', code: 'SRCH', icon: '⌕', end: false },
+  { to: '/offline', label: 'Offline', code: 'ANLZ', icon: '∿', end: false },
 ];
 
 export function NavBar() {
@@ -15,13 +15,19 @@ export function NavBar() {
   return (
     <nav
       aria-label="Navegación principal"
-      className="flex shrink-0 flex-col gap-1 bg-ink p-4 md:w-64"
+      className="flex shrink-0 flex-col gap-1 border-b border-line bg-surface-2 p-4 md:w-60 md:border-b-0 md:border-r"
     >
-      <div className="mb-4 px-2 text-center">
-        <div className="text-3xl">📡</div>
-        <div className="mt-1 font-bold text-white">DSP Anomaly</div>
-        <div className="text-[0.65rem] uppercase tracking-widest text-slate-500">
-          Sistema de detección
+      <div className="mb-5 hidden items-center gap-2 px-1 md:flex">
+        <span className="grid h-8 w-8 place-items-center rounded-md border border-primary/40 bg-primary/10 font-display text-primary shadow-glow-primary">
+          ◈
+        </span>
+        <div className="leading-tight">
+          <div className="font-display text-sm font-bold uppercase tracking-widest text-ink">
+            DSP·AD
+          </div>
+          <div className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-dim">
+            mission control
+          </div>
         </div>
       </div>
 
@@ -32,20 +38,25 @@ export function NavBar() {
             to={l.to}
             end={l.end}
             className={({ isActive }) =>
-              `flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${
+              `group flex items-center gap-3 rounded-md px-3 py-2 font-mono text-sm transition-colors ${
                 isActive
-                  ? 'bg-primary/30 text-white'
-                  : 'text-slate-300 hover:bg-white/5 hover:text-white'
+                  ? 'bg-primary/10 text-primary ring-1 ring-inset ring-primary/30'
+                  : 'text-muted hover:bg-white/5 hover:text-ink'
               }`
             }
           >
-            <span aria-hidden>{l.icon}</span>
+            <span aria-hidden className="text-base leading-none">
+              {l.icon}
+            </span>
             <span className="hidden sm:inline">{l.label}</span>
+            <span className="ml-auto hidden text-[0.6rem] tracking-widest text-dim md:inline">
+              {l.code}
+            </span>
           </NavLink>
         ))}
       </div>
 
-      <div className="mt-auto hidden px-2 pt-4 md:block">
+      <div className="mt-auto hidden px-1 pt-5 md:block">
         <ConnectionIndicator status={status} onReconnect={reconnectNow} />
       </div>
     </nav>

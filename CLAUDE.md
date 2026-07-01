@@ -12,7 +12,12 @@ poetry shell                                                # activar entorno
 # Ejecutar el sistema (tres procesos independientes)
 poetry run python -m src.pipeline                          # pipeline de captura + detección
 poetry run uvicorn src.api.main:app --reload               # API FastAPI
-poetry run streamlit run src/dashboard/app.py              # dashboard
+poetry run streamlit run src/dashboard/app.py              # dashboard Streamlit (legacy, en decomisión)
+
+# Dashboard SPA (React + TS + Vite) — reemplaza a Streamlit; ver docs/frontend-migration/
+cd web && npm install && npm run dev                       # dashboard SPA (http://localhost:5173)
+cd web && npm test                                         # tests del SPA (Vitest)
+cd web && npm run build                                    # typecheck (tsc) + build de producción
 
 # Tests
 poetry run pytest                                          # todos los tests
@@ -51,6 +56,12 @@ FastAPI async. Expone datos almacenados y recibe notificaciones del pipeline.
 - `POST /internal/score` — pipeline notifica scores; el router WebSocket los broadcast a todos los clientes conectados
 - `POST /internal/reset-detector` — activa flag `app.state.detector_reset_pending = True`
 - `GET /internal/reset-pending` — pipeline pollea este endpoint; retorna `{"pending": bool}` y limpia el flag (one-shot)
+- `POST /internal/fusion-config` — dashboard fija `strategy`/`audio_weight`/`gates` de fusión en vivo; el pipeline los pollea (ADR-0012). 422 si la estrategia es inválida
+- `GET /internal/fusion-config` — config de fusión actual `{strategy, audio_weight, gates}`
+- `GET /health` — healthcheck `{"status":"ok"}` (para el SPA y orquestación)
+
+**CORS:** `create_app()` registra `CORSMiddleware` con orígenes de la env `CORS_ORIGINS`
+(default `http://localhost:5173`) para permitir el SPA desacoplado.
 - `GET /events/` — lista eventos con filtros (min_score, fecha, paginación)
 - `GET /events/{id}/audio|frame` — stream de archivos desde filesystem
 - `GET /events/{id}/frame/annotated` — devuelve el frame JPEG con el bounding box de la fuente más probable dibujado (rectángulo rojo + label `source X.XXX`)
@@ -65,8 +76,20 @@ FastAPI async. Expone datos almacenados y recibe notificaciones del pipeline.
 
 Instancias de `Database`, `FAISSStore` y `EventStore` se inyectan vía `request.app.state` (dependency injection en `dependencies.py`). El startup usa `lifespan` context manager (FastAPI 0.93+).
 
-### 3. Dashboard (`src/dashboard/`)
-Streamlit app que consume el API vía `APIClient` (httpx síncrono).
+### 3. Dashboard
+
+**Actual (recomendado): SPA en `web/`** — dashboard desacoplado en **React + TypeScript + Vite**
+con lenguaje visual "Mission Control" (tema oscuro, tipografía técnica Chakra Petch + JetBrains
+Mono, telemetría en mono tabular). Tiempo real *event-driven* vía el hook `useAnomalyStream`
+(WebSocket con reconexión backoff+jitter, heartbeat, detección de *staleness*, ring buffers);
+estado de servidor con TanStack Query; estado de fusión con Zustand; gráficos uPlot (streaming) +
+Recharts (KDE/RMS/IMF/heatmap). Tests con Vitest. Reemplaza a Streamlit —
+ver [ADR-0013](docs/adr/0013-reemplazo-dashboard-streamlit-por-spa.md) y
+[`docs/frontend-migration/`](docs/frontend-migration/). Requiere `CORSMiddleware` en la API
+(env `CORS_ORIGINS`, default `http://localhost:5173`).
+
+**Legacy: `src/dashboard/`** — Streamlit app que consume el API vía `APIClient` (httpx síncrono);
+permanece operativa como referencia hasta confirmar la paridad del SPA (fase F8).
 
 Cuatro páginas; todas exponen `render(client: APIClient) -> None`:
 - **Live Monitor** — scores en tiempo real vía WebSocket; historial de scores con overlay del umbral adaptativo (p98 normalizado, línea punteada); amplitud RMS; **distribución KDE** de scores recientes (gaussian_kde + umbral vertical); métrica **Drift AUC** (C2ST: 0.5=sin drift, 1.0=drift total) con caption ⚠️ de top drift features; indicador de motion_energy; chip **"Fuente probable"** con coordenadas y source_score de la caja top-1; botones "Reiniciar historial" y "Reiniciar detector"

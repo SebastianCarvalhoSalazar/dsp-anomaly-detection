@@ -32,5 +32,12 @@ independiente.
 
 ## Estado
 
-Documentación de planificación. **No se ha escrito todavía el código del SPA.** La implementación
-sigue el roadmap por fases descrito en el [doc 02](02-plan-migracion-spa.md).
+**Implementado** en [`web/`](../../web/) (fases F0–F5 del roadmap): SPA React+TS+Vite funcional
+con las 4 páginas, capa API tipada, `useAnomalyStream`, controles de fusión y tests (Vitest).
+Backend con `CORSMiddleware` + `/health`. Pendientes: F6 (a11y/Lighthouse), F7 (serving estático
+desde FastAPI) y F8 (decomisión de Streamlit tras confirmar paridad).
+
+> **Nota de diseño:** la implementación **no** fue una migración 1:1 del Streamlit. Se adoptó un
+> rediseño con lenguaje visual **"Mission Control"** (tema oscuro de sala de control, tipografía
+> técnica, telemetría en mono tabular, la señal viva como protagonista), corrigiendo la jerarquía
+> plana y la estética genérica del dashboard anterior. Ver [`web/README.md`](../../web/README.md).

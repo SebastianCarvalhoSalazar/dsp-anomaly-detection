@@ -6,6 +6,12 @@ que consume la API existente. Ver el análisis del estado actual en
 [doc 03](03-contrato-api-frontend.md). Decisión formal en
 [ADR-0013](../adr/0013-reemplazo-dashboard-streamlit-por-spa.md).
 
+> **Estado (implementado):** F0–F5 completas en [`web/`](../../web/). El "mapeo de páginas" de la
+> §6 se ejecutó como **rediseño "Mission Control"** (tema oscuro de consola, no un port 1:1 del
+> Streamlit): jerarquía con la señal viva como protagonista, telemetría en mono tabular, `SystemBanner`
+> de estado global y `DriftGauge`. El resto de la arquitectura (hook WS, capa API, fusión en TS,
+> Zustand, charts) se implementó según lo descrito.
+
 ## 1. Objetivos y principios
 
 - **Tiempo real de verdad:** la UI reacciona a cada mensaje del WebSocket, sin re-render de página

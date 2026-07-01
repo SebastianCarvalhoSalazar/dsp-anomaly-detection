@@ -11,13 +11,15 @@ export function EventCard({
   onDelete: (id: number) => void;
 }) {
   return (
-    <div className="rounded-2xl bg-surface p-5 shadow-sm">
+    <div className="rounded-lg border border-line bg-surface p-5 shadow-panel transition-colors hover:border-primary/40">
       <div className="flex items-start justify-between">
         <div>
-          <div className="text-sm font-bold text-ink">Evento #{event.id}</div>
-          <div className="text-xs text-muted">{fmtTimestamp(event.timestamp)}</div>
+          <div className="font-display text-sm font-bold uppercase tracking-wide text-ink">
+            EVT·{String(event.id).padStart(4, '0')}
+          </div>
+          <div className="font-mono text-xs text-muted">{fmtTimestamp(event.timestamp)}</div>
         </div>
-        <div className={`text-2xl font-extrabold ${scoreColorClass(event.anomaly_score)}`}>
+        <div className={`font-mono text-2xl font-bold tnum ${scoreColorClass(event.anomaly_score)}`}>
           {fmtScore(event.anomaly_score)}
         </div>
       </div>
@@ -33,14 +35,12 @@ export function EventCard({
         )}
       </div>
 
-      <div className="mt-4 flex items-center justify-between">
-        <span className="text-xs text-muted">
-          embedding {event.has_embedding ? '✓' : '—'}
-        </span>
+      <div className="mt-4 flex items-center justify-between font-mono text-xs">
+        <span className="text-dim">embedding {event.has_embedding ? '✓' : '—'}</span>
         <button
           type="button"
           onClick={() => onDelete(event.id)}
-          className="rounded-lg px-3 py-1.5 text-sm font-medium text-anomaly hover:bg-red-50"
+          className="rounded-md px-3 py-1.5 font-semibold uppercase tracking-wide text-anomaly hover:bg-anomaly/10"
         >
           Eliminar
         </button>

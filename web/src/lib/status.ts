@@ -18,23 +18,42 @@ export function bigScoreColor(score: number, isFitted: boolean): string {
   return score >= ANOMALY_THRESHOLD ? 'text-anomaly' : 'text-normal';
 }
 
-export const STATUS_META: Record<
-  DetectorStatus,
-  { label: string; chip: string; dot: string }
-> = {
+export interface StatusMeta {
+  label: string;
+  /** Clases del chip (fondo translúcido + texto + borde). */
+  chip: string;
+  dot: string;
+  /** Color de acento (texto) del estado. */
+  accent: string;
+  /** Sombra de glow del estado. */
+  glow: string;
+  /** Etiqueta larga para el banner del sistema. */
+  system: string;
+}
+
+export const STATUS_META: Record<DetectorStatus, StatusMeta> = {
   warmup: {
     label: 'Calentando',
-    chip: 'bg-amber-100 text-amber-800',
+    chip: 'bg-warning/10 text-warning ring-1 ring-warning/30',
     dot: 'bg-warning',
+    accent: 'text-warning',
+    glow: 'shadow-glow-warning',
+    system: 'CALIBRANDO',
   },
   anomaly: {
-    label: 'ANOMALÍA',
-    chip: 'bg-red-100 text-red-700',
+    label: 'Anomalía',
+    chip: 'bg-anomaly/10 text-anomaly ring-1 ring-anomaly/40',
     dot: 'bg-anomaly',
+    accent: 'text-anomaly',
+    glow: 'shadow-glow-anomaly',
+    system: 'ANOMALÍA DETECTADA',
   },
   normal: {
     label: 'Normal',
-    chip: 'bg-emerald-100 text-emerald-800',
+    chip: 'bg-normal/10 text-normal ring-1 ring-normal/30',
     dot: 'bg-normal',
+    accent: 'text-normal',
+    glow: 'shadow-glow-normal',
+    system: 'SISTEMA NOMINAL',
   },
 };

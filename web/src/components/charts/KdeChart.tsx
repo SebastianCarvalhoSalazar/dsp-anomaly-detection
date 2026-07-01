@@ -20,17 +20,19 @@ export function KdeChart({ scores, threshold }: { scores: number[]; threshold: n
             type="number"
             domain={[0, 1]}
             tickCount={6}
-            tick={{ fontSize: 10, fill: '#64748B' }}
+            tick={{ fontSize: 10, fill: '#42546B' }}
+            stroke="#1E2A3A"
           />
           <YAxis hide />
           <Area
             dataKey="y"
-            stroke="#8B5CF6"
-            fill="rgba(139,92,246,0.12)"
+            stroke="#22D3EE"
+            strokeWidth={2}
+            fill="rgba(34,211,238,0.12)"
             isAnimationActive={false}
           />
           {threshold > 0 && (
-            <ReferenceLine x={threshold} stroke="#F59E0B" strokeDasharray="4 4" />
+            <ReferenceLine x={threshold} stroke="#FBBF24" strokeDasharray="4 4" />
           )}
         </AreaChart>
       </ResponsiveContainer>

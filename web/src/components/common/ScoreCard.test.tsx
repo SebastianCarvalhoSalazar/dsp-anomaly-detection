@@ -10,8 +10,8 @@ describe('ScoreCard', () => {
     expect(screen.getByText('Calentando')).toBeInTheDocument();
   });
 
-  it('muestra ANOMALÍA cuando corresponde', () => {
+  it('muestra Anomalía cuando corresponde', () => {
     render(<ScoreCard score={0.9} isFitted isAnomaly />);
-    expect(screen.getByText('ANOMALÍA')).toBeInTheDocument();
+    expect(screen.getByText('Anomalía')).toBeInTheDocument();
   });
 });

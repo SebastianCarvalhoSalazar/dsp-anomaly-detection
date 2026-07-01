@@ -14,8 +14,8 @@ export function AnnotatedFrame({ eventId, alt }: { eventId: number; alt: string 
   const [failed, setFailed] = useState(false);
   if (failed) {
     return (
-      <div className="flex h-40 items-center justify-center rounded-xl bg-bg text-sm text-muted">
-        Sin frame disponible
+      <div className="flex h-40 items-center justify-center rounded-lg border border-line bg-surface-2 font-mono text-xs text-muted">
+        sin frame
       </div>
     );
   }
@@ -25,7 +25,7 @@ export function AnnotatedFrame({ eventId, alt }: { eventId: number; alt: string 
       alt={alt}
       loading="lazy"
       onError={() => setFailed(true)}
-      className="w-full rounded-xl"
+      className="w-full rounded-lg border border-line"
     />
   );
 }

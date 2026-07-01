@@ -6,17 +6,19 @@ export function SimilarityResultCard({ result }: { result: SimilarEventResponse 
   const { event, cosine_similarity } = result;
   const strong = cosine_similarity >= 0.7;
   return (
-    <div className="rounded-2xl bg-surface p-4 shadow-sm">
+    <div className="rounded-lg border border-line bg-surface p-4 shadow-panel">
       <div className="flex items-start justify-between">
         <div>
-          <div className="text-sm font-bold text-ink">Evento #{event.id}</div>
-          <div className="text-xs text-muted">{fmtTimestamp(event.timestamp)}</div>
+          <div className="font-display text-sm font-bold uppercase tracking-wide text-ink">
+            EVT·{String(event.id).padStart(4, '0')}
+          </div>
+          <div className="font-mono text-xs text-muted">{fmtTimestamp(event.timestamp)}</div>
         </div>
         <div className="text-right">
-          <div className={`text-xl font-extrabold ${strong ? 'text-normal' : 'text-warning'}`}>
+          <div className={`font-mono text-xl font-bold tnum ${strong ? 'text-normal' : 'text-warning'}`}>
             {fmtScore(cosine_similarity)}
           </div>
-          <div className="text-[0.65rem] uppercase tracking-wider text-muted">similitud</div>
+          <div className="text-[0.6rem] uppercase tracking-[0.14em] text-dim">similitud</div>
         </div>
       </div>
       <div className="mt-3 space-y-2">

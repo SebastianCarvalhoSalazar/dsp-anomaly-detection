@@ -30,17 +30,17 @@ export function FileDropzone({
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="flex w-full flex-col items-center gap-1 rounded-xl border-2 border-dashed border-line bg-bg px-4 py-8 text-sm text-muted hover:border-primary"
+        className="flex w-full flex-col items-center gap-1 rounded-lg border-2 border-dashed border-line bg-surface-2 px-4 py-8 font-mono text-sm text-muted transition-colors hover:border-primary/60"
       >
         <span className="text-2xl" aria-hidden>
-          ⬆️
+          ⬆
         </span>
         {file ? (
-          <span className="font-medium text-ink">
-            {file.name} ({fmtBytes(file.size)})
+          <span className="text-ink">
+            {file.name} · {fmtBytes(file.size)}
           </span>
         ) : (
-          <span>Haz clic para elegir un archivo ({accept.join(', ')})</span>
+          <span>clic para elegir archivo · {accept.join(' ')}</span>
         )}
       </button>
       <input

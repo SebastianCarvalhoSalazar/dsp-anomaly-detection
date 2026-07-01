@@ -5,6 +5,20 @@ Consume la API FastAPI existente (REST + WebSocket). Ver el plan en
 [`docs/frontend-migration/`](../docs/frontend-migration/) y la decisión en
 [ADR-0013](../docs/adr/0013-reemplazo-dashboard-streamlit-por-spa.md).
 
+## Diseño · "Mission Control"
+
+Lenguaje visual de **sala de control / instrumento de laboratorio**, no una migración 1:1
+del Streamlit:
+
+- **Tema oscuro** (`#0A0E14`) con rejilla técnica sutil y glow por estado.
+- **Tipografía:** display **Chakra Petch** (títulos) + **JetBrains Mono** (telemetría). Los
+  números usan `tabular-nums` para que no "salten" al actualizarse.
+- **Señal como protagonista:** `ScoreCard` instrumental con glow por estado + traza tipo
+  osciloscopio; `SystemBanner` con el estado global inequívoco (NOMINAL / CALIBRANDO / ANOMALÍA);
+  `DriftGauge` para el C2ST AUC.
+- **Color señal:** cian (telemetría), esmeralda (normal), ámbar (warmup), rojo (anomalía).
+- Tokens centralizados en `tailwind.config.ts` (reemplazan al morado/blanco genérico anterior).
+
 ## Requisitos
 
 - Node 18+ (probado con Node 20).
@@ -41,8 +55,9 @@ npm run dev                 # http://localhost:5173
 - **`src/store/fusionDraftStore.ts`** — borrador de fusión (Zustand, persistente).
 - **`src/lib/`** — utilidades puras: `fusion.ts` (reimplementación de las 4 estrategias),
   `ringBuffer.ts`, `kde.ts`, `status.ts`, `format.ts`, `constants.ts`.
-- **`src/components/`** — `charts/` (uPlot + Recharts), `common/`, `fusion/`, `events/`,
-  `similarity/`.
+- **`src/components/`** — `charts/` (uPlot + Recharts), `common/` (incl. `ScoreCard`,
+  `SystemBanner`, `DriftGauge`, `StatusChip`, `ConnectionIndicator`, `ConfirmDialog`),
+  `fusion/`, `events/`, `similarity/`.
 - **`src/pages/`** — `LiveMonitor`, `EventFeed`, `SimilaritySearch`, `OfflineAnalysis`
   (cargadas con `React.lazy`).
 

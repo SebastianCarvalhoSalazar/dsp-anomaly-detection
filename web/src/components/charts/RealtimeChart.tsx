@@ -8,8 +8,8 @@ interface Props {
   height?: number;
 }
 
-/** Wrapper uPlot para la serie de score en tiempo real + overlay de umbral. */
-export function RealtimeChart({ score, threshold, height = 170 }: Props) {
+/** Wrapper uPlot (tema oscuro) para la serie de score + overlay de umbral. */
+export function RealtimeChart({ score, threshold, height = 180 }: Props) {
   const elRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
 
@@ -31,12 +31,18 @@ export function RealtimeChart({ score, threshold, height = 170 }: Props) {
       scales: { x: { time: false }, y: { range: [0, 1] } },
       axes: [
         { show: false },
-        { stroke: '#64748B', grid: { stroke: '#F1F5F9' }, size: 36 },
+        {
+          stroke: '#42546B',
+          grid: { stroke: '#1E2A3A', width: 1 },
+          ticks: { stroke: '#1E2A3A' },
+          size: 38,
+          font: '11px "JetBrains Mono", monospace',
+        },
       ],
       series: [
         {},
-        { stroke: '#7C3AED', width: 2, fill: 'rgba(124,58,237,0.12)' },
-        { stroke: '#F59E0B', width: 1.5, dash: [4, 4] },
+        { stroke: '#22D3EE', width: 2, fill: 'rgba(34,211,238,0.14)' },
+        { stroke: '#FBBF24', width: 1.5, dash: [4, 4] },
       ],
     };
     const plot = new uPlot(opts, buildData(), el);
