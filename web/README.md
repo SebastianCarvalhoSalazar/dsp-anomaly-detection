@@ -17,6 +17,9 @@ del Streamlit:
   osciloscopio; `SystemBanner` con el estado global inequívoco (NOMINAL / CALIBRANDO / ANOMALÍA);
   `DriftGauge` para el C2ST AUC.
 - **Color señal:** cian (telemetría), esmeralda (normal), ámbar (warmup), rojo (anomalía).
+- **Legibilidad de datos volátiles:** los *top contributors* (explicabilidad) se **congelan en la
+  última anomalía** con su timestamp — no parpadean cada ventana; los tiles del detector lento
+  muestran `— off` / `calibrando` / valor en vez de un `0.000` ambiguo.
 - Tokens centralizados en `tailwind.config.ts` (reemplazan al morado/blanco genérico anterior).
 
 ## Requisitos

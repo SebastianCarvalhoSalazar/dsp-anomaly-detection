@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Card, SectionLabel } from '@/components/common/Card';
 import { BBoxChip } from '@/components/common/BBoxChip';
@@ -23,6 +23,11 @@ export default function LiveMonitor() {
   const msg = stream.lastMessage;
   const resetDetector = useResetDetector();
   const [confirmReset, setConfirmReset] = useState(false);
+  const [lastAnomaly, setLastAnomaly] = useState<{
+    ts: string;
+    audio: string[];
+    video: string[];
+  } | null>(null);
 
   const score = msg?.anomaly_score ?? 0;
   const isFitted = msg?.is_fitted ?? false;
@@ -30,11 +35,19 @@ export default function LiveMonitor() {
   const status = deriveStatus(isFitted, isAnomaly);
   const lastThreshold = stream.thresholdSeries.at(-1) ?? 0.5;
   const topDrift = msg?.top_drift_features ?? [];
-  const topAudio = msg?.top_audio_features ?? [];
-  const topVideo = msg?.top_video_features ?? [];
   const slowEnabled = msg?.slow_enabled ?? false;
   const slowAudio = slowTileDisplay(slowEnabled, msg?.slow_audio_fitted ?? false, msg?.slow_audio_score ?? 0);
   const slowVideo = slowTileDisplay(slowEnabled, msg?.slow_video_fitted ?? false, msg?.slow_video_score ?? 0);
+
+  // Los "top contributors" se recalculan cada ventana y son ruido en operación
+  // normal; solo importan en una anomalía. Congelamos los de la última anomalía.
+  useEffect(() => {
+    if (!msg?.is_anomaly) return;
+    const audio = msg.top_audio_features ?? [];
+    const video = msg.top_video_features ?? [];
+    if (audio.length === 0 && video.length === 0) return;
+    setLastAnomaly({ ts: fmtTimestamp(msg.timestamp), audio, video });
+  }, [msg]);
 
   return (
     <>
@@ -105,12 +118,18 @@ export default function LiveMonitor() {
           <MetricTile label="Video · rápido" value={fmtScore(msg?.fast_video_score ?? 0)} />
           <MetricTile label="Video · lento" value={slowVideo.text} valueClass={slowVideo.cls} />
         </div>
-        {(topAudio.length > 0 || topVideo.length > 0) && (
-          <p className="mt-2 font-mono text-xs text-muted">
-            {topAudio.length > 0 && <span>🔊 {topAudio.join(' · ')}</span>}
-            {topAudio.length > 0 && topVideo.length > 0 && '   '}
-            {topVideo.length > 0 && <span>🎥 {topVideo.join(' · ')}</span>}
-          </p>
+        {lastAnomaly && (
+          <div className="mt-3 rounded-md border border-line bg-surface-2 p-3 font-mono text-xs">
+            <div className="mb-1 text-[0.6rem] uppercase tracking-[0.14em] text-dim">
+              Top contributors · última anomalía @ {lastAnomaly.ts}
+            </div>
+            {lastAnomaly.audio.length > 0 && (
+              <div className="text-muted">🔊 {lastAnomaly.audio.join(' · ')}</div>
+            )}
+            {lastAnomaly.video.length > 0 && (
+              <div className="text-muted">🎥 {lastAnomaly.video.join(' · ')}</div>
+            )}
+          </div>
         )}
       </Card>
 
