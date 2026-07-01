@@ -11,6 +11,7 @@ poetry shell                                                # activar entorno
 
 # Ejecutar el sistema (tres procesos independientes)
 poetry run python -m src.pipeline                          # pipeline de captura + detección
+ENABLE_SLOW_MODELS=true poetry run python -m src.pipeline  # pipeline con doble horizonte (rápido + lento)
 poetry run uvicorn src.api.main:app --reload               # API FastAPI
 poetry run streamlit run src/dashboard/app.py              # dashboard Streamlit (legacy, en decomisión)
 
@@ -137,7 +138,8 @@ El sistema identifica cuál bounding box de movimiento es más probable que sea 
 - `src/dsp/` y `src/vision/` son síncronos por diseño; no introducir `async` en esos módulos
 - `pytest-asyncio` configurado con `asyncio_mode = "auto"` — los tests async no necesitan `@pytest.mark.asyncio`
 - pylint desactiva C0114/C0115/C0116 (docstrings) — no añadir docstrings en módulos que no los tenían
-- Variables de entorno en `.env` (copiar desde `.env.example`): `DATABASE_URL`, `QDRANT_HOST`, `EVENTS_DIR`, `API_PORT`
+- Variables de entorno en `.env` de la raíz (copiar desde `.env.example`), **cargado automáticamente** por `python-dotenv` en el pipeline y la API: `EVENTS_DIR`, `DB_PATH`, `FAISS_PATH`, `API_BASE_URL`, `CORS_ORIGINS`, `ENABLE_SLOW_MODELS`. Una variable exportada en el shell tiene prioridad. El SPA usa su propio `web/.env` (`VITE_API_BASE_URL`).
+- **Doble horizonte:** `ENABLE_SLOW_MODELS=true` activa el detector lento además del rápido (opt-in, cómputo extra). En línea: `ENABLE_SLOW_MODELS=true poetry run python -m src.pipeline`.
 
 ---
 

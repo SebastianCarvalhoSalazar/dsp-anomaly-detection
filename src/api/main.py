@@ -6,8 +6,15 @@ import threading
 from contextlib import asynccontextmanager
 from typing import Optional
 
+from pathlib import Path
+
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Carga el .env de la raíz del repo para que las variables (EVENTS_DIR, DB_PATH,
+# FAISS_PATH, CORS_ORIGINS, ...) se apliquen sin exportarlas manualmente.
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 from src.storage import Database, EventStore, FAISSStore, StorageConfig
 from src.api.routers import events, search, websocket

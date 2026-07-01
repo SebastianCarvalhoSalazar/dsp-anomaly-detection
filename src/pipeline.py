@@ -26,6 +26,15 @@ import json
 import httpx
 import numpy as np
 import sounddevice as sd
+from dotenv import load_dotenv
+
+# Carga variables desde el .env de la raíz del repo (si existe) para que
+# EVENTS_DIR, DB_PATH, CORS_ORIGINS, ENABLE_SLOW_MODELS, etc. surtan efecto sin
+# tener que exportarlas manualmente. Una variable ya presente en el entorno
+# tiene prioridad (load_dotenv no sobrescribe por defecto).
+from pathlib import Path as _Path
+
+load_dotenv(_Path(__file__).resolve().parent.parent / ".env")
 
 from src.detection import AnomalyDetector, DetectorConfig, SnapshotStore
 from src.dsp import AudioProcessor, DSPConfig

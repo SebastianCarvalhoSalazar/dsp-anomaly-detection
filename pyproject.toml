@@ -39,6 +39,7 @@ asyncpg = "^0.31.0"
 psycopg2-binary = "^2.9.11"
 kymatio = "^0.3.0"
 python-multipart = "^0.0.22"
+python-dotenv = "^1.2.2"
 
 
 [tool.poetry.group.dev.dependencies]

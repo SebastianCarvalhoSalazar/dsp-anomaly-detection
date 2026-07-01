@@ -587,8 +587,11 @@ DB_PATH=./data/events.db  # base de datos SQLite
 FAISS_PATH=./data/faiss.index
 API_BASE_URL=http://localhost:8000
 CORS_ORIGINS=http://localhost:5173   # orígenes permitidos para el SPA (coma-separados)
+ENABLE_SLOW_MODELS=false             # true = activa el detector lento (doble horizonte)
 ```
 
+> El `.env` de la raíz se **carga automáticamente** al arrancar el pipeline y la API
+> (`python-dotenv`). Una variable ya exportada en el shell tiene prioridad sobre el `.env`.
 > El SPA usa su propia variable `VITE_API_BASE_URL` en `web/.env` (por defecto
 > `http://localhost:8000`).
 
@@ -649,6 +652,17 @@ poetry run streamlit run src/dashboard/app.py   # http://localhost:8501
 ```bash
 poetry run python -m src.pipeline
 ```
+
+**Doble horizonte (detector rápido + lento):** el detector lento es opt-in. Para activar **ambos
+modos** define `ENABLE_SLOW_MODELS=true` — en línea:
+
+```bash
+ENABLE_SLOW_MODELS=true poetry run python -m src.pipeline
+```
+
+o en el `.env` de la raíz (se carga automáticamente vía `python-dotenv`). El detector lento tiene
+su propio warmup (buffer de 5000 ventanas), por lo que `slow_audio_score`/`slow_video_score`
+permanecen en `0.0` hasta que se entrena por primera vez.
 
 El pipeline:
 1. Abre el micrófono (dispositivo 0 por defecto)
