@@ -1,7 +1,7 @@
 """Regression tests for the Fase 0 BaseAnomalyDetector fixes.
 
 Covers the review findings the refactor was meant to close:
-  C1 — normalizer not polluted by anomalies once fitted
+  F2 — anomalous windows quarantined out of the training buffer
   C2 — calibration leaves headroom (no blanket saturation at 1.0)
   H1 — heavy fit is computed outside the lock (purity of _compute_fit)
   H6 — injected feature names used for drift output
@@ -41,29 +41,31 @@ def _cfg(**kw):
 
 
 # --------------------------------------------------------------------------- #
-# C1 — normalizer freeze on anomaly
+# F2 — anomalous windows are quarantined out of the training buffer
+# (replaces C1: the online Welford normalizer no longer exists, see F1)
 # --------------------------------------------------------------------------- #
 
-def test_c1_normalizer_skips_anomalous_windows_when_frozen():
-    det = AnomalyDetector(_cfg(freeze_normalizer_on_anomaly=True))
+def test_f2_anomalous_windows_do_not_enter_training_buffer():
+    det = AnomalyDetector(_cfg())
     for fv in _normals(50, seed=1):
         det.score(fv)
-    n_before = det._normalizer._n
+    before = [v.copy() for v in det._buffer]
     for fv in _outliers(30, seed=2):
         det.score(fv)
-    # Some clearly-anomalous windows must have been excluded from the
-    # running statistics → fewer than 30 updates folded in.
-    assert det._normalizer._n - n_before < 30
+    after = list(det._buffer)
+    # Every outlier was flagged and quarantined: the buffer is unchanged.
+    assert len(after) == len(before)
+    assert all(np.array_equal(a, b) for a, b in zip(after, before))
 
 
-def test_c1_legacy_path_updates_every_window():
-    det = AnomalyDetector(_cfg(freeze_normalizer_on_anomaly=False))
+def test_f2_quarantine_disabled_keeps_legacy_path():
+    det = AnomalyDetector(_cfg(quarantine_anomalies=False))
     for fv in _normals(50, seed=1):
         det.score(fv)
-    n_before = det._normalizer._n
-    for fv in _outliers(30, seed=2):
+    outs = _outliers(30, seed=2)
+    for fv in outs:
         det.score(fv)
-    assert det._normalizer._n - n_before == 30
+    assert np.array_equal(det._buffer[-1], outs[-1])
 
 
 # --------------------------------------------------------------------------- #
@@ -123,13 +125,15 @@ def test_h1_compute_fit_does_not_mutate_state():
 def test_h6_injected_feature_names_used_in_drift():
     names = [f"feat_{i}" for i in range(_DIM)]
     det = AnomalyDetector(
-        _cfg(buffer_size=40, refit_every=40, enable_drift_detection=True),
+        _cfg(buffer_size=40, refit_every=40, enable_drift_detection=True,
+             quarantine_anomalies=False),
         feature_names=names,
     )
     # Two fits with a distribution shift between them → drift features set.
     for fv in _normals(40, seed=0):
         det.score(fv)
-    for fv in _outliers(40, seed=1):
+    # 40 new windows reach the buffer; the refit runs on the next window.
+    for fv in _outliers(41, seed=1):
         det.score(fv)
     top = det.get_drift_metrics()["top_drift_features"]
     assert top  # non-empty
