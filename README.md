@@ -158,16 +158,12 @@ La salida (n_coefs × T) se reduce haciendo **mean pooling sobre el eje temporal
 - **RMS (Root Mean Square):** amplitud media de la ventana, sensible a cambios de volumen
 - **ZCR (Zero Crossing Rate):** fracción de samples consecutivos con cambio de signo; alto en sonidos de alta frecuencia (metales, vidrios) y bajo en vocales o tonos
 
-### Segmentación en ventanas solapadas
+### Segmentación en ventanas
 
-```
-|← 4096 →|
-|████████|
-    |████████|  ← hop = 1024 (75% overlap)
-        |████████|
-```
-
-El solapamiento del 75% (hop=1024 sobre window=4096) asegura que transientes cortos no queden divididos entre dos ventanas y se capturan en al menos una con amplitud máxima.
+En vivo, `sounddevice` entrega bloques de `window_size = 4096` muestras **sin
+solapamiento** (`blocksize = window_size`): una ventana cada 0.256 s a 16 kHz.
+`DSPConfig.hop_size` y `AudioProcessor.segment_signal()` solo aplican al
+procesamiento offline de señales completas.
 
 ### EMD — Descomposición en Modos Empíricos (análisis offline)
 
@@ -214,11 +210,22 @@ anomaly_score = 1.0 - (raw_score - buffer_min) / (buffer_max - buffer_min)
 anomaly_score = clip(anomaly_score, 0.0, 1.0)
 ```
 
-Un evento se considera anomalía cuando `raw_score < model.offset_` (threshold del Isolation Forest).
+Una ventana es anómala cuando `raw_score` cae bajo el **umbral fijado en el último fit**:
+el percentil 2 de los scores del buffer de entrenamiento (con
+`enable_adaptive_threshold=False`, `model.offset_`). Se confirma tras 3 ventanas
+consecutivas (histéresis). Las ventanas anómalas quedan en **cuarentena** fuera del
+buffer de entrenamiento; si la anomalía dura más de ~60 s
+(`accept_after_windows`) se acepta como nuevo normal y se fuerza un refit
+([ADR-0014](docs/adr/0014-nucleo-de-deteccion-funcional.md)).
+
+Las ventanas anómalas consecutivas forman **un solo evento** (`src/events/`): se
+cierra tras 2 s sin anomalía (`EVENT_RELEASE_S`) o a los 60 s
+(`EVENT_MAX_DURATION_S`) y guarda inicio, fin, duración y el frame del pico. La
+escritura y los embeddings corren en un hilo aparte.
 
 #### Fase de calentamiento
 
-Durante las primeras ~500 ventanas (~2 min de audio a 16kHz con 4096/1024), el detector devuelve `is_fitted=False` y `anomaly_score=0.0`. El dashboard muestra "Calentando..." durante este período.
+Durante las primeras 500 ventanas (~128 s de audio a 16 kHz, ventanas de 4096), el detector devuelve `is_fitted=False` y `anomaly_score=0.0`. El dashboard muestra "Calentando..." durante este período.
 
 ### PCA — Reducción de dimensionalidad
 
@@ -233,6 +240,11 @@ model.fit(X_reduced)
 Empíricamente, 9 componentes capturan >99% de la varianza; 25 es un margen de seguridad que preserva señales débiles sin perder la eficiencia del IF. El scoring aplica `pca.transform()` sobre cada vector individual antes de `score_samples()`.
 
 ### C2ST — Detección de drift por Classifier Two-Sample Test
+
+> **Opcional, apagado por defecto** (`ENABLE_DRIFT=true` para activarlo). El AUC
+> tiene un sesgo conocido: los buffers comparados se solapan (300 de 500 muestras
+> con refits cada 200), lo que lo empuja hacia 0.5 aunque haya drift. Ver
+> [ADR-0014](docs/adr/0014-nucleo-de-deteccion-funcional.md).
 
 Para medir si la distribución de features está cambiando entre refits sucesivos, se usa un **Classifier Two-Sample Test (C2ST)**:
 
@@ -588,6 +600,14 @@ FAISS_PATH=./data/faiss.index
 API_BASE_URL=http://localhost:8000
 CORS_ORIGINS=http://localhost:5173   # orígenes permitidos para el SPA (coma-separados)
 ENABLE_SLOW_MODELS=false             # true = activa el detector lento (doble horizonte)
+# Componentes que no deciden eventos — opcionales (ADR-0014):
+ENABLE_DRIFT=false                   # C2ST + refits sensibles a drift
+ENABLE_SNAPSHOTS=false               # guarda el modelo en disco en cada refit
+ENABLE_VIDEO_DETECTOR=false          # detector de video + calibración + fusión
+FUSION_GATES_DECISION=false          # la fusión (no el audio) decide los eventos
+# Segmentación de eventos:
+EVENT_RELEASE_S=2.0                  # silencio que cierra un evento
+EVENT_MAX_DURATION_S=60.0            # duración máxima de un evento
 ```
 
 > El `.env` de la raíz se **carga automáticamente** al arrancar el pipeline y la API

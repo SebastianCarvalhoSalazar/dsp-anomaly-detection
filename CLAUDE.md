@@ -23,6 +23,7 @@ cd web && npm run build                                    # typecheck (tsc) + b
 # Tests
 poetry run pytest                                          # todos los tests
 poetry run pytest tests/test_foo.py::test_bar -x          # un test específico
+poetry run python -m scripts.replay --scenario events      # banco offline con verdad conocida (también: quiet, --wav)
 
 # Lint
 poetry run pylint src/
@@ -47,9 +48,11 @@ Proceso principal síncrono. Orquesta todos los módulos de procesamiento.
 
 **Model preloading:** Al inicio de `run()`, los modelos Wav2Vec2+DINOv2 se precargan en un background thread paralelo al warmup, eliminando la penalización de ~60s en la primera anomalía.
 
-**Detector online:** `AnomalyDetector` usa Isolation Forest con buffer deslizante de 500 ventanas. Se re-entrena cada 200 ventanas nuevas. Features son Z-score normalizados (Welford online), luego reducidos de 251 a **25 dimensiones con PCA** antes de alimentar el IF. Scores pasan por EMA smoothing (α=0.3) y requieren 3 ventanas consecutivas de anomalía (hysteresis) para confirmar. Umbral adaptativo con percentil 2.0 sobre ventana de 500 scores. Umbral visual: percentil 98 de scores normalizados [0,1].
+**Detector online:** `AnomalyDetector` usa Isolation Forest con buffer deslizante de 500 ventanas. Se re-entrena cada 200 ventanas nuevas. El buffer guarda vectores **crudos**; cada fit aprende `scaler (z-score) → PCA (251→25) → IF` y la cadena queda congelada hasta el siguiente fit. Umbral de decisión **fijo por fit** = percentil 2.0 de los scores del buffer de entrenamiento; se confirma con 3 ventanas consecutivas (hysteresis). Las ventanas anómalas quedan en **cuarentena** fuera del buffer; si persisten `accept_after_windows` (≈60 s) se aceptan como nuevo normal (refit forzado). `anomaly_score` se suaviza con EMA (α=0.3) solo para visualización; `adaptive_threshold` del WS es el mismo umbral de decisión en escala [0,1]. Ver ADR-0014 y `docs/plan-correcciones.md`.
 
-**C2ST drift detection:** En cada refit, un `RandomForestClassifier` (50 árboles, `max_depth=4`) intenta separar el buffer anterior del actual. AUC 3-fold CV simetrizado (`max(auc, 1-auc)`): 0.5 = sin drift, 1.0 = drift total. Las top-5 feature importances se mapean a nombres legibles vía `_build_feature_names()` (e.g., `scat_45`, `wavelet_band_3`, `spectral_centroid`) y se publican como `top_drift_features` en el payload WebSocket.
+**Eventos:** `EventSegmenter` (`src/events/`) agrupa ventanas anómalas consecutivas en **un** evento (cierre tras 2 s sin anomalía o a los 60 s; inicio, fin, duración, frame del pico). `EventWriter` persiste y calcula embeddings en un hilo aparte (el loop de audio nunca espera). Cada ventana lleva la hora de **captura** (`capture_midpoint`), no la de salida de la cola.
+
+**C2ST drift detection (opcional, `ENABLE_DRIFT=true`; apagado por defecto):** En cada refit, un `RandomForestClassifier` (50 árboles, `max_depth=4`) intenta separar el buffer anterior del actual. AUC 3-fold CV simetrizado (`max(auc, 1-auc)`): 0.5 = sin drift, 1.0 = drift total. Las top-5 feature importances se mapean a nombres legibles vía `_build_feature_names()` (e.g., `scat_45`, `wavelet_band_3`, `spectral_centroid`) y se publican como `top_drift_features` en el payload WebSocket.
 
 ### 2. API (`src/api/`)
 FastAPI async. Expone datos almacenados y recibe notificaciones del pipeline.
@@ -138,7 +141,7 @@ El sistema identifica cuál bounding box de movimiento es más probable que sea 
 - `src/dsp/` y `src/vision/` son síncronos por diseño; no introducir `async` en esos módulos
 - `pytest-asyncio` configurado con `asyncio_mode = "auto"` — los tests async no necesitan `@pytest.mark.asyncio`
 - pylint desactiva C0114/C0115/C0116 (docstrings) — no añadir docstrings en módulos que no los tenían
-- Variables de entorno en `.env` de la raíz (copiar desde `.env.example`), **cargado automáticamente** por `python-dotenv` en el pipeline y la API: `EVENTS_DIR`, `DB_PATH`, `FAISS_PATH`, `API_BASE_URL`, `CORS_ORIGINS`, `ENABLE_SLOW_MODELS`. Una variable exportada en el shell tiene prioridad. El SPA usa su propio `web/.env` (`VITE_API_BASE_URL`).
+- Variables de entorno en `.env` de la raíz (copiar desde `.env.example`), **cargado automáticamente** por `python-dotenv` en el pipeline y la API: `EVENTS_DIR`, `DB_PATH`, `FAISS_PATH`, `API_BASE_URL`, `CORS_ORIGINS`, `ENABLE_SLOW_MODELS`, `ENABLE_DRIFT`, `ENABLE_SNAPSHOTS`, `ENABLE_VIDEO_DETECTOR`, `FUSION_GATES_DECISION`, `EVENT_RELEASE_S`, `EVENT_MAX_DURATION_S`. Una variable exportada en el shell tiene prioridad. El SPA usa su propio `web/.env` (`VITE_API_BASE_URL`).
 - **Doble horizonte:** `ENABLE_SLOW_MODELS=true` activa el detector lento además del rápido (opt-in, cómputo extra). En línea: `ENABLE_SLOW_MODELS=true poetry run python -m src.pipeline`.
 
 ---
