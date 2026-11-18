@@ -304,115 +304,127 @@ class Pipeline:
                 self._check_reset()
                 self._check_fusion_config()
 
-            # Accumulate raw samples for pre-event context before scoring
-            self._pre_audio_buffer.extend(window.tolist())
+            self.process_window(window, ts_window)
 
-            feature_vec = self.dsp.process_window(window)
-            rms = float(np.sqrt(np.mean(window ** 2)))
-            result = self.detector.score(feature_vec)
+    def process_window(self, window: np.ndarray, ts_window: float) -> dict:
+        """Process one audio window end-to-end (features → scores → events).
 
-            # Temporal alignment: pick the frame nearest in time to this
-            # audio window (frames are already copies — no copy needed here).
-            captured = self._frame_buffer.nearest(ts_window)
-            frame = captured.frame if captured is not None else None
+        Separated from the capture loop so it can be driven offline (tests,
+        ``scripts/replay.py``) without a microphone. Returns a summary of the
+        step for observability.
+        """
+        # Accumulate raw samples for pre-event context before scoring
+        self._pre_audio_buffer.extend(window.tolist())
 
-            boxes = self.vision.detect(frame) if frame is not None else []
+        feature_vec = self.dsp.process_window(window)
+        rms = float(np.sqrt(np.mean(window ** 2)))
+        result = self.detector.score(feature_vec)
 
-            # --- Video modality -------------------------------------------
-            # Extract motion features while boxes still carry their IoU
-            # temporal weights (the source-ranking below overwrites them).
-            video_array = None
-            if frame is not None:
-                video_fv = self.video_extractor.extract(boxes, frame.shape)
-                video_array = video_fv.to_array()
-                video_result = self.video_detector.score(video_array)
-                video_raw = video_result.anomaly_score
-            else:
-                video_raw = 0.0
+        # Temporal alignment: pick the frame nearest in time to this
+        # audio window (frames are already copies — no copy needed here).
+        captured = self._frame_buffer.nearest(ts_window)
+        frame = captured.frame if captured is not None else None
 
-            # --- Dual horizon (Req 6): slow models, decision uses fast ----
-            slow_audio = 0.0
-            slow_video = 0.0
-            slow_audio_fitted = False
-            slow_video_fitted = False
-            if self._enable_slow:
-                _slow_a = self.slow_detector.score(feature_vec)
-                slow_audio = _slow_a.anomaly_score
-                slow_audio_fitted = _slow_a.is_fitted
-                if video_array is not None:
-                    _slow_v = self.slow_video_detector.score(video_array)
-                    slow_video = _slow_v.anomaly_score
-                    slow_video_fitted = _slow_v.is_fitted
+        boxes = self.vision.detect(frame) if frame is not None else []
 
-            # --- Calibration + fusion -------------------------------------
-            audio_cal = self.audio_calibrator.calibrate_and_update(
-                result.anomaly_score
+        # --- Video modality -------------------------------------------
+        # Extract motion features while boxes still carry their IoU
+        # temporal weights (the source-ranking below overwrites them).
+        video_array = None
+        if frame is not None:
+            video_fv = self.video_extractor.extract(boxes, frame.shape)
+            video_array = video_fv.to_array()
+            video_result = self.video_detector.score(video_array)
+            video_raw = video_result.anomaly_score
+        else:
+            video_raw = 0.0
+
+        # --- Dual horizon (Req 6): slow models, decision uses fast ----
+        slow_audio = 0.0
+        slow_video = 0.0
+        slow_audio_fitted = False
+        slow_video_fitted = False
+        if self._enable_slow:
+            _slow_a = self.slow_detector.score(feature_vec)
+            slow_audio = _slow_a.anomaly_score
+            slow_audio_fitted = _slow_a.is_fitted
+            if video_array is not None:
+                _slow_v = self.slow_video_detector.score(video_array)
+                slow_video = _slow_v.anomaly_score
+                slow_video_fitted = _slow_v.is_fitted
+
+        # --- Calibration + fusion -------------------------------------
+        audio_cal = self.audio_calibrator.calibrate_and_update(
+            result.anomaly_score
+        )
+        video_cal = self.video_calibrator.calibrate_and_update(video_raw)
+        fusion = self.fusion_strategy.combine(audio_cal, video_cal)
+
+        # --- Explainability (Req 9): top contributing features --------
+        top_audio = self.detector.top_features(feature_vec)
+        top_video = (
+            self.video_detector.top_features(video_array)
+            if video_array is not None else []
+        )
+
+        mm = {
+            "audio_score": audio_cal,
+            "video_score": video_cal,
+            "combined_score": fusion.combined_score,
+            "dominant_modality": fusion.dominant_modality,
+            "fast_audio_score": result.anomaly_score,
+            "slow_audio_score": slow_audio,
+            "fast_video_score": video_raw,
+            "slow_video_score": slow_video,
+            "slow_enabled": self._enable_slow,
+            "slow_audio_fitted": slow_audio_fitted,
+            "slow_video_fitted": slow_video_fitted,
+            "top_audio_features": top_audio,
+            "top_video_features": top_video,
+        }
+
+        # Cross-modal correlation (3.2)
+        if boxes and frame is not None:
+            frame_area = float(
+                frame.shape[0] * frame.shape[1]
             )
-            video_cal = self.video_calibrator.calibrate_and_update(video_raw)
-            fusion = self.fusion_strategy.combine(audio_cal, video_cal)
+            # Clamp to [0,1]: overlapping boxes can sum past frame_area (M7).
+            self._last_motion_energy = min(
+                sum(b.area for b in boxes) / frame_area, 1.0
+            )
+            # Source-score ranking (Option B):
+            # score = anomaly_score × area_ratio × temporal_weight
+            for b in boxes:
+                area_ratio = b.area / frame_area
+                b.source_score = (
+                    result.anomaly_score
+                    * area_ratio
+                    * b.source_score  # temporal weight
+                )
+            boxes.sort(
+                key=lambda b: b.source_score,
+                reverse=True,
+            )
+            boxes = boxes[:1]  # best match only
+        else:
+            self._last_motion_energy *= 0.9  # decay
 
-            # --- Explainability (Req 9): top contributing features --------
-            top_audio = self.detector.top_features(feature_vec)
-            top_video = (
-                self.video_detector.top_features(video_array)
-                if video_array is not None else []
+        # Notify API (non-blocking fire-and-forget)
+        self._notify_api(result, boxes, rms=rms, mm=mm)
+
+        # Event gating: audio detector by default; the fused decision only
+        # when explicitly enabled (FUSION_GATES_DECISION).
+        gate = fusion.is_anomaly if self._fusion_gates else result.is_anomaly
+        if gate:
+            # Snapshot the pre-event buffer (last 3s) as the event audio
+            audio_clip = np.array(list(self._pre_audio_buffer), dtype=np.float32)
+            self._handle_anomaly(
+                result, audio_clip, frame, boxes,
+                motion_energy=self._last_motion_energy, mm=mm,
             )
 
-            mm = {
-                "audio_score": audio_cal,
-                "video_score": video_cal,
-                "combined_score": fusion.combined_score,
-                "dominant_modality": fusion.dominant_modality,
-                "fast_audio_score": result.anomaly_score,
-                "slow_audio_score": slow_audio,
-                "fast_video_score": video_raw,
-                "slow_video_score": slow_video,
-                "slow_enabled": self._enable_slow,
-                "slow_audio_fitted": slow_audio_fitted,
-                "slow_video_fitted": slow_video_fitted,
-                "top_audio_features": top_audio,
-                "top_video_features": top_video,
-            }
+        return {"result": result, "boxes": boxes, "mm": mm, "gate": bool(gate)}
 
-            # Cross-modal correlation (3.2)
-            if boxes and frame is not None:
-                frame_area = float(
-                    frame.shape[0] * frame.shape[1]
-                )
-                # Clamp to [0,1]: overlapping boxes can sum past frame_area (M7).
-                self._last_motion_energy = min(
-                    sum(b.area for b in boxes) / frame_area, 1.0
-                )
-                # Source-score ranking (Option B):
-                # score = anomaly_score × area_ratio × temporal_weight
-                for b in boxes:
-                    area_ratio = b.area / frame_area
-                    b.source_score = (
-                        result.anomaly_score
-                        * area_ratio
-                        * b.source_score  # temporal weight
-                    )
-                boxes.sort(
-                    key=lambda b: b.source_score,
-                    reverse=True,
-                )
-                boxes = boxes[:1]  # best match only
-            else:
-                self._last_motion_energy *= 0.9  # decay
-
-            # Notify API (non-blocking fire-and-forget)
-            self._notify_api(result, boxes, rms=rms, mm=mm)
-
-            # Event gating: audio detector by default; the fused decision only
-            # when explicitly enabled (FUSION_GATES_DECISION).
-            gate = fusion.is_anomaly if self._fusion_gates else result.is_anomaly
-            if gate:
-                # Snapshot the pre-event buffer (last 3s) as the event audio
-                audio_clip = np.array(list(self._pre_audio_buffer), dtype=np.float32)
-                self._handle_anomaly(
-                    result, audio_clip, frame, boxes,
-                    motion_energy=self._last_motion_energy, mm=mm,
-                )
 
     def _handle_anomaly(
         self,
