@@ -168,7 +168,8 @@ def replay(sig: np.ndarray, encode_delay: float, workdir: Path, env: dict):
         sim_now["t"] = (k + 1) * WIN_S  # window end time (scenario clock)
         w = sig[k * WIN: (k + 1) * WIN]
         a = time.perf_counter()
-        out = p.process_window(w, t0 + sim_now["t"])
+        # ts = capture midpoint of the window, as the live callback reports.
+        out = p.process_window(w, t0 + (k + 0.5) * WIN_S)
         service[k] = time.perf_counter() - a
         flags[k] = bool(out.get("gate", False))
     if hasattr(p, "flush_events"):

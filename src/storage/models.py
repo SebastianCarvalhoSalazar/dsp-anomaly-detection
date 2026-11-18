@@ -10,7 +10,10 @@ class AnomalyEvent(Base):
     __tablename__ = "anomaly_events"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    # Event onset (capture time); end/duration added with event segmentation
     timestamp = Column(DateTime(timezone=True), nullable=False)
+    end_timestamp = Column(DateTime(timezone=True), nullable=True)
+    duration_s = Column(Float, nullable=True)
     anomaly_score = Column(Float, nullable=False)
     # Relative path to the event directory under events_dir
     event_dir = Column(String(512), nullable=False, unique=True)
