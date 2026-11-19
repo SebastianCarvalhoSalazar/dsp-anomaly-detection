@@ -194,6 +194,9 @@ Formato: fecha · fase · qué se hizo / qué se encontró / resultado.
     refits cada 10 ventanas sobre un buffer de 40, el AUC cae de 0.99 a 0.52 aunque
     el drift continúa. El test que exigía que el *último* refit fuera "drift" dependía
     de la alineación de ventanas; ahora verifica que haya habido refits por drift.
+    *(Corrección posterior: el sesgo también actuaba al revés —con la configuración
+    real y datos estables daba AUC ~0.85—; se corrigió comparando solo filas
+    exclusivas. Ver [`plan-destilacion.md`](plan-destilacion.md).)*
   - Comportamiento nuevo: el refit programado ocurre en la ventana siguiente a la que
     completa `refit_every` muestras nuevas (antes, en la misma).
 - **2026-11-18 · Fase 0 (línea base)** — Entorno completo instalado. Hizo falta la

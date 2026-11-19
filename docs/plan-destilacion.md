@@ -15,7 +15,7 @@
 | 4 — Retirar Streamlit (adelantado, antes del 2) | ✅ Hecho | ver `git log` |
 | 5 — Dependencias y código muerto | ✅ Hecho | `dfb9baf` |
 | 6 — Documentación | ✅ Hecho | (este commit) |
-| Validación en el Mac del usuario (SPA + prueba real) | ⏳ pendiente | |
+| Validación en el Mac del usuario (SPA + prueba real) | ✅ Hecha (ver bitácora) | |
 
 ## Contexto
 
@@ -90,8 +90,8 @@ Diff total respecto a `main` en `src`, `tests`, `web/src` y `scripts`: 253 inser
 - ✅ Dashboard: `npm test` (11) y `npm run build` en verde, también en CI (ver bitácora).
 - ✅ `zustand` retirado.
 - ✅ Carga real de Wav2Vec2 + DINOv2 con el entorno reducido (validado en el Mac del usuario).
-- ⏳ **Prueba real** (a cargo del usuario): API + pipeline + SPA; un sonido de unos segundos
-  debe dar **un** evento con frame, audio, espectrograma y "Movimiento principal".
+- ✅ **Prueba real** en el Mac del usuario: un sonido → un evento con frame, audio, espectrograma
+  y "Movimiento principal" (ver bitácora).
 
 ---
 
@@ -196,3 +196,25 @@ Diff total respecto a `main` en `src`, `tests`, `web/src` y `scripts`: 253 inser
   - `npm uninstall zustand`: salen `zustand` y `use-sync-external-store`, nada más cambia
     (`useAnomalyStream` usa el `useSyncExternalStore` nativo de React). Tests y build en verde.
   - CI: nuevo job `web` (`npm ci`, `npm test`, `npm run build`).
+- **2026-11-19 · Prueba real (Mac del usuario)** — Un sonido generó **un** evento: audio de 5 s
+  (3 s de pre-roll + 2 s de cierre), frame y frame anotado (`motion 0.022`), espectrograma,
+  embedding y vector FAISS. Duración 0.64 s = mínimo posible (una sola ventana confirmada).
+- **2026-11-19 · Post-merge** (rama reiniciada desde `main` tras el PR #11):
+  - **Duración de los eventos validada:** `scripts/replay.py` reporta ahora la duración guardada.
+    Tono 15 s → 15.49 s; chirp 3 s → 3.46 s; doble ráfaga 4 s → 4.22 s (un solo evento);
+    impulso 0.3 s → 0.64 s (mínimo).
+  - **`window_index` congelado en 499** (detectado en la prueba real; bug anterior a ADR-0014):
+    valía `len(buffer) - 1`. Ahora cuenta las ventanas desde el arranque o el reset. Huella
+    idéntica.
+  - **Sesgo del C2ST, corregido.** Las filas compartidas por dos buffers sucesivos aparecían en
+    entrenamiento con una etiqueta y en prueba con la otra: AUC crudo ~0.10, simetrizado ~0.90.
+    Medido con la configuración real (500/200) y datos estables: **0.84–0.86 antes, 0.52–0.54
+    después**; drift sostenido con refits cada 10 ventanas: ~0.52 antes, 1.0 después. Afecta a
+    lo observado en vivo con `ENABLE_DRIFT=true` (AUC 0.64–0.84 y un refit "drift"): eran
+    compatibles con el artefacto. Huella idéntica (el drift está apagado por defecto).
+  - **Debilidad de la cuarentena (ADR-0014), reproducida, pendiente:** en vivo, tras subir el
+    ruido de fondo (RMS mediano 0.0041 → ~0.007) aparecieron 17 eventos en ~2 min. Con el banco
+    (`--wav`, fondo sintético que sube 1.7× a los 4 min, sin sonidos): **25 eventos en 8 min**,
+    sin adaptación, con drift apagado o encendido. Causa: la anomalía es intermitente; cada vez
+    que se corta, la cuarentena se descarta y nunca llega a `accept_after_windows` seguidas; el
+    buffer solo recibe las ventanas más tranquilas. Mitigación inmediata: "Reiniciar detector".

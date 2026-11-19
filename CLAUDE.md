@@ -52,7 +52,7 @@ usan los tests y `scripts/replay.py` sin micrófono.
 
 **Detector online (`src/detection/base.py`):** Isolation Forest con buffer deslizante de 500 ventanas **crudas**; refit cada 200 ventanas nuevas. Cada fit aprende `scaler (z-score) → PCA (251→25) → IF` y la cadena queda congelada hasta el siguiente. Umbral de decisión **fijo por fit** = percentil 2.0 de los scores del buffer de entrenamiento; se confirma con 3 ventanas consecutivas (hysteresis). Las ventanas anómalas quedan en **cuarentena** fuera del buffer; si persisten `accept_after_windows` (234 ≈ 60 s) se aceptan como nuevo normal (refit forzado, `refit_reason="accepted"`). `anomaly_score` se suaviza con EMA (α=0.3) solo para visualización; `adaptive_threshold` del WS es el umbral de decisión en escala [0,1]. Estado persistido en `data/detector_state.pkl` (versión 2; versiones anteriores se ignoran).
 
-**Opcionales, apagados por defecto (no deciden eventos):** `ENABLE_DRIFT` (C2ST con `RandomForestClassifier` entre buffers sucesivos + refits sensibles a drift; el AUC tiene un sesgo conocido por buffers solapados) y `ENABLE_SNAPSHOTS` (guarda el modelo en cada refit).
+**Opcionales, apagados por defecto (no deciden eventos):** `ENABLE_DRIFT` (C2ST con `RandomForestClassifier` sobre las ventanas **exclusivas** de dos buffers sucesivos —comparar los buffers solapados completos daba AUC ~0.85 con datos estables— + refits sensibles a drift) y `ENABLE_SNAPSHOTS` (guarda el modelo en cada refit).
 
 ### 2. API (`src/api/`)
 FastAPI async. Expone datos almacenados y recibe notificaciones del pipeline.

@@ -179,14 +179,17 @@ def replay(sig: np.ndarray, encode_delay: float, workdir: Path, env: dict):
         # Async event writer: wait for pending writes, then take each event's
         # onset from its stored timestamp (scenario clock = ts - t0).
         p.flush_events()
-        rows = p.db.list_events(limit=100000)
+        rows = sorted(p.db.list_events(limit=100000), key=lambda r: r.timestamp)
         # SQLite drops tzinfo: stored values are UTC, read back naive.
-        saved_at = sorted(
+        saved_at = [
             r.timestamp.replace(tzinfo=timezone.utc).timestamp() - t0
             for r in rows
-        )
+        ]
+        durations = [r.duration_s for r in rows]
+    else:
+        durations = [None] * len(saved_at)
     n_db = len(p.db.list_events(limit=100000))
-    return service, flags, saved_at, n_db, raws
+    return service, flags, saved_at, n_db, raws, durations
 
 
 def simulate_drops(service: np.ndarray, period: float, qmax: int = 64) -> int:
@@ -208,7 +211,8 @@ def simulate_drops(service: np.ndarray, period: float, qmax: int = 64) -> int:
     return drops
 
 
-def evaluate(truth, saved_at, flags, minutes, margin=1.0):
+def evaluate(truth, saved_at, flags, minutes, margin=1.0, durations=None):
+    durations = durations or [None] * len(saved_at)
     rows = []
     used = set()
     for ev in truth:
@@ -223,6 +227,11 @@ def evaluate(truth, saved_at, flags, minutes, margin=1.0):
             "detectado": bool(hits),
             "eventos_guardados": len(hits),
             "error_inicio_s": round(saved_at[hits[0]] - ev.start, 2) if hits else None,
+            # Stored duration of the (first) event that covers this sound.
+            "duracion_evento_s": (
+                round(durations[hits[0]], 2)
+                if hits and durations[hits[0]] is not None else None
+            ),
             "cobertura_ventanas": round(cover, 2),
         })
     false_alarms = [t for i, t in enumerate(saved_at) if i not in used]
@@ -260,13 +269,13 @@ def main(argv=None) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         cwd = os.getcwd()
         try:
-            service, flags, saved_at, n_db, raws = replay(
+            service, flags, saved_at, n_db, raws, durations = replay(
                 sig, args.encode_delay, Path(tmp), env
             )
         finally:
             os.chdir(cwd)
 
-    rows, fa = evaluate(truth, saved_at, flags, minutes)
+    rows, fa = evaluate(truth, saved_at, flags, minutes, durations=durations)
     drops = simulate_drops(service, WIN_S)
     hours = minutes / 60
     report = {

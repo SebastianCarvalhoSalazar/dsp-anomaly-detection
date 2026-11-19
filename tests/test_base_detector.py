@@ -172,3 +172,16 @@ def test_m4_feature_dim_change_resets_cleanly():
     r = det.score(np.zeros(_DIM + 5, dtype=np.float32))
     assert not r.is_fitted
     assert det._feature_dim == _DIM + 5
+
+
+# --------------------------------------------------------------------------- #
+# window_index — running counter (was frozen at buffer_size - 1)
+# --------------------------------------------------------------------------- #
+
+def test_window_index_keeps_counting_after_buffer_is_full():
+    det = AnomalyDetector(_cfg(buffer_size=50))
+    idx = [det.score(fv).window_index for fv in _normals(120, seed=3)]
+    # Before the fix it stopped at 49 (= buffer_size - 1) after the warmup.
+    assert idx == list(range(120))
+    det.reset()
+    assert det.score(_normals(1, seed=4)[0]).window_index == 0

@@ -59,6 +59,27 @@ logger = logging.getLogger(__name__)
 # Minimum buffered windows before warmup explanations are meaningful.
 _MIN_EXPLAIN_SAMPLES = 30
 
+# Minimum exclusive rows per side for a meaningful C2ST; with fewer, the
+# previous drift metrics are kept.
+_MIN_C2ST_SAMPLES = 10
+
+
+def _exclusive_rows(
+    prev: np.ndarray, curr: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Rows of ``prev`` absent from ``curr`` and rows of ``curr`` absent from
+    ``prev``. Buffers hold raw vectors copied verbatim, so a shared window is
+    byte-identical in both."""
+    prev_keys = {row.tobytes() for row in prev}
+    curr_keys = {row.tobytes() for row in curr}
+    prev_only = [row for row in prev if row.tobytes() not in curr_keys]
+    curr_only = [row for row in curr if row.tobytes() not in prev_keys]
+    dim = prev.shape[1]
+    return (
+        np.array(prev_only, dtype=np.float32).reshape(-1, dim),
+        np.array(curr_only, dtype=np.float32).reshape(-1, dim),
+    )
+
 
 class BaseAnomalyDetector:
     """Modality-agnostic online anomaly detector.
@@ -85,6 +106,8 @@ class BaseAnomalyDetector:
         self._is_fitted = False
         self._fitting = False  # guard: a fit is being computed (H1)
         self._samples_since_refit = 0
+        # Windows scored since construction / last reset (AnomalyResult.window_index)
+        self._window_count = 0
         self._feature_dim: Optional[int] = None
         self._lock = threading.Lock()
 
@@ -157,6 +180,10 @@ class BaseAnomalyDetector:
             if appended:
                 self._buffer.append(fv.copy())
             buf_len = len(self._buffer)
+            # Running window index. (It used to be buf_len - 1, which froze at
+            # buffer_size - 1 = 499 once the buffer was full.)
+            window_index = self._window_count
+            self._window_count += 1
 
             need_fit = False
             is_initial = False
@@ -219,7 +246,7 @@ class BaseAnomalyDetector:
                     is_anomaly=False,
                     is_fitted=False,
                     timestamp=ts,
-                    window_index=buf_len - 1,
+                    window_index=window_index,
                     feature_vector=fv,
                 )
 
@@ -258,7 +285,7 @@ class BaseAnomalyDetector:
             is_anomaly=is_anomaly,
             is_fitted=True,
             timestamp=ts,
-            window_index=buf_len - 1,
+            window_index=window_index,
             feature_vector=fv,
         )
 
@@ -360,6 +387,7 @@ class BaseAnomalyDetector:
         self._is_fitted = False
         self._fitting = False
         self._samples_since_refit = 0
+        self._window_count = 0
         self._feature_dim = None
         self._smoothed_score = 0.0
         self._consecutive_anomalies = 0
@@ -523,6 +551,11 @@ class BaseAnomalyDetector:
         Train a RandomForest classifier to separate the previous buffer
         (label 0) from the current one (label 1). Returns
         ``(auc, top_5_feature_names)``. AUC ≈ 0.5 → no drift.
+
+        Callers pass only the rows exclusive to each buffer (see
+        ``_exclusive_rows``): consecutive training buffers overlap (300 of 500
+        rows with the default refit_every=200), and identical rows with
+        opposite labels pulled the AUC towards 0.5 even under real drift.
         """
         n0, n1 = len(X_prev), len(X_curr)
         X = np.vstack([X_prev, X_curr])
@@ -546,6 +579,19 @@ class BaseAnomalyDetector:
         top_names = [feat_names[i] for i in top_idx if importances[i] > 0]
         return auc, top_names
 
+    def _drift_metrics(
+        self, prev_buffer: Optional[np.ndarray], curr_buffer: np.ndarray
+    ) -> tuple[float, list[str]]:
+        """C2ST between the previous and the new training buffer, on the rows
+        exclusive to each. Keeps the previous metrics when drift detection is
+        off, on the first fit, or with too few exclusive rows."""
+        if not self._config.enable_drift_detection or prev_buffer is None:
+            return self._drift_auc, self._top_drift_features
+        prev_only, curr_only = _exclusive_rows(prev_buffer, curr_buffer)
+        if min(len(prev_only), len(curr_only)) < _MIN_C2ST_SAMPLES:
+            return self._drift_auc, self._top_drift_features
+        return self._run_c2st(prev_only, curr_only)
+
     def _compute_fit(
         self, X: np.ndarray, prev_buffer: Optional[np.ndarray]
     ) -> dict:
@@ -554,10 +600,7 @@ class BaseAnomalyDetector:
         Pure with respect to ``self`` mutable state — returns the artefacts
         to be swapped in atomically by ``_apply_fit``.
         """
-        drift_auc = self._drift_auc
-        top_feats = self._top_drift_features
-        if self._config.enable_drift_detection and prev_buffer is not None:
-            drift_auc, top_feats = self._run_c2st(prev_buffer, X)
+        drift_auc, top_feats = self._drift_metrics(prev_buffer, X)
 
         # F1: the scaler is learned from this buffer and frozen with the model.
         mean, std = self._fit_scaler(X)
