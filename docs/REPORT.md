@@ -1,5 +1,13 @@
 # Informe técnico — Evolución a detector multimodal (v0.3)
 
+> **Documento histórico (v0.3).** Describe la evolución a un detector multimodal de fusión
+> tardía. El núcleo se corrigió en [ADR-0014](adr/0014-nucleo-de-deteccion-funcional.md) y la
+> fusión, el detector de video, el doble horizonte, el EMD y Streamlit se retiraron en
+> [ADR-0015](adr/0015-destilacion-del-sistema.md). La arquitectura vigente está en
+> [`architecture/overview.md`](architecture/overview.md). (El archivo
+> `architecture/multimodal-overview.md` citado abajo se reemplazó por ese documento.)
+
+
 **Rama:** `feature/multimodal-fusion-drift-aware` · **Base:** `dev/v0.2.0-alpha`
 **Estado:** 240 tests en verde · 4 fases entregadas (commits Fase 0–3).
 

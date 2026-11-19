@@ -1,6 +1,6 @@
 # ADR-0010: Explicabilidad por z-score vs baseline reciente
 
-- **Estado:** Aceptado
+- **Estado:** Aceptado — modificado por [ADR-0014](0014-nucleo-de-deteccion-funcional.md): el baseline es el scaler del último fit; [ADR-0015](0015-destilacion-del-sistema.md) retira `top_video_features`
 - **Fecha:** 2026-06-21
 - **Decisores:** Equipo del proyecto
 - **Fase:** 3

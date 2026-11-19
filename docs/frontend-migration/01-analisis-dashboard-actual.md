@@ -1,5 +1,11 @@
 # 01 — Análisis del dashboard actual (Streamlit)
 
+> **Documento histórico.** Plan y análisis de la migración Streamlit → SPA, ya completada:
+> Streamlit se retiró en [ADR-0015](../adr/0015-destilacion-del-sistema.md), junto con la
+> fusión, los modelos lentos y el análisis EMD que aquí se mencionan. El contrato vigente con la
+> API está en [`03-contrato-api-frontend.md`](03-contrato-api-frontend.md).
+
+
 Análisis estático del dashboard Streamlit (`src/dashboard/`) realizado leyendo el código
 completo de las cuatro páginas, `app.py`, `api_client.py` y `styles.py`, junto con el mapa de
 la API y los ADRs. El objetivo es documentar **bugs**, **deuda técnica** y un conjunto de

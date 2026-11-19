@@ -8,13 +8,13 @@
 
 | Paso | Estado | Commit |
 |---|---|---|
-| 0 — Línea base y huella de detección | ✅ Hecho | (este commit) |
-| 1 — EMD fuera, mel como detalle del evento | ✅ Hecho (SPA sin compilar aquí) | ver bitácora |
-| 2 — Retirar fusión, detector de video y modelos lentos | ✅ Hecho (SPA sin compilar aquí) | ver bitácora |
-| 3 — "Fuente probable" → "movimiento principal" | ✅ Hecho (SPA sin compilar aquí) | ver bitácora |
-| 4 — Retirar Streamlit (adelantado, antes del 2) | ✅ Hecho | ver bitácora |
-| 5 — Dependencias y código muerto | ✅ Hecho | ver bitácora |
-| 6 — Documentación | ⏳ | |
+| 0 — Línea base y huella de detección | ✅ Hecho | `7413a53` |
+| 1 — EMD fuera, mel como detalle del evento | ✅ Hecho (SPA sin compilar aquí) | `9cde0d7` |
+| 2 — Retirar fusión, detector de video y modelos lentos | ✅ Hecho (SPA sin compilar aquí) | `b1ccb2a` |
+| 3 — "Fuente probable" → "movimiento principal" | ✅ Hecho (SPA sin compilar aquí) | `7a88055` |
+| 4 — Retirar Streamlit (adelantado, antes del 2) | ✅ Hecho | ver `git log` |
+| 5 — Dependencias y código muerto | ✅ Hecho | `dfb9baf` |
+| 6 — Documentación | ✅ Hecho | (este commit) |
 | Validación en el Mac del usuario (SPA + prueba real) | ⏳ pendiente | |
 
 ## Contexto
@@ -65,6 +65,35 @@ Cada paso debe pasar esta puerta antes del commit:
 | `quiet`: `flags_sha1` / `scores_sha1` | `ab6e36037b9e…` / `d0f2f8200e19…` |
 
 Determinismo comprobado: dos corridas seguidas de `events` dan hashes e informe idénticos.
+
+## Resultados (línea base `main` → final)
+
+| Medida | Antes | Después |
+|---|---|---|
+| Huella `events` / `quiet` (`flags_sha1`, `scores_sha1`) | — | **idéntica en todos los pasos** |
+| `events`: eventos guardados / falsas alarmas | 6 / 0 | 6 / 0 |
+| `quiet`: falsas alarmas en 15 min | 0 | 0 |
+| Tests del núcleo y código de `detection`/`dsp`/`events` | — | **sin cambios** |
+| `pytest` | 279 passed | 224 passed (los tests retirados cubrían código retirado; +5 nuevos) |
+| Avisos de `pylint` | 140 | 123 (ninguno nuevo; nota 8.72 → 8.63, ver Paso 2) |
+| Python en `src/` | 6269 líneas, 57 archivos | 3843 líneas, 41 archivos |
+| SPA `web/src` (`.ts`/`.tsx`) | 2783 líneas | 2300 líneas |
+| Paquetes en `poetry.lock` | 166 | 113 |
+| Endpoints retirados | — | `/internal/fusion-config` (GET/POST), `/events/{id}/offline_analysis` |
+| Endpoint nuevo | — | `/events/{id}/spectrogram` |
+
+Diff total respecto a `main` en `src`, `tests`, `web/src` y `scripts`: 253 inserciones,
+3823 borrados.
+
+## Pendientes (puerta de merge en el Mac del usuario)
+
+- `cd web && npm install && npm test && npm run build`: los cambios del SPA (Pasos 1–3) no
+  se pudieron compilar aquí (dependencias en un registro npm privado).
+- `npm uninstall zustand` (queda sin uso) y commit del `package-lock.json` resultante.
+- Prueba real: API + pipeline + SPA; un sonido de unos segundos debe dar **un** evento con
+  frame, audio, espectrograma y "Movimiento principal".
+- Cargar los modelos reales (Wav2Vec2 + DINOv2): aquí Hugging Face está bloqueado; solo se
+  verificó que las clases importan con el entorno reducido.
 
 ---
 
@@ -129,3 +158,18 @@ Determinismo comprobado: dos corridas seguidas de `events` dan hashes e informe 
     bloqueado).
   - **Puerta:** huella idéntica; `pytest` 224 passed (salen 6 tests del código muerto); `pylint`
     125 → 123 avisos, ninguno nuevo; imports de transformers/librosa/torchaudio OK.
+- **2026-11-19 · Paso 6** — Documentación al día: README (introducción, arquitectura, flujo,
+  detector, espectrograma, movimiento principal, API, dashboard, estructura, requisitos con
+  PortAudio, instalación, ejecución, tests con recuentos reales, banco de reproducción, stack,
+  limitaciones), `RUNNING.md` reescrito, `CLAUDE.md` reescrito, `.env.example`, `web/README.md`,
+  ADR-0015 nuevo, estados actualizados en ADR 0001–0014 y en el índice,
+  `architecture/multimodal-overview.md` → `architecture/overview.md` (arquitectura vigente),
+  contrato API ↔ frontend reescrito desde `types.ts`, y cabecera "documento histórico" en
+  `REPORT.md` y en la documentación de la migración del frontend.
+  - **Hallazgos al verificar contra el código:** el README decía que borrar un evento dejaba
+    huérfano su vector FAISS (el código lo elimina por ID desde el fix C3); indicaba Python
+    3.11–3.12 (el proyecto admite 3.11–3.14), un warmup de "~25 s / 200 ventanas" (son ~128 s /
+    500) y una carpeta `doc/` que no existe. Corregidos.
+  - **Verificación:** todos los enlaces relativos de la documentación apuntan a archivos
+    existentes (salvo el marcador de la plantilla de ADR); los términos retirados solo aparecen
+    en documentos marcados como históricos o en notas de compatibilidad.

@@ -1,14 +1,15 @@
 # DSP Anomaly Dashboard (SPA)
 
-Dashboard web en **React + TypeScript + Vite** que reemplaza al dashboard Streamlit.
-Consume la API FastAPI existente (REST + WebSocket). Ver el plan en
-[`docs/frontend-migration/`](../docs/frontend-migration/) y la decisión en
-[ADR-0013](../docs/adr/0013-reemplazo-dashboard-streamlit-por-spa.md).
+Dashboard web en **React + TypeScript + Vite** del sistema de detección de anomalías. Consume la
+API FastAPI (REST + WebSocket); contrato en
+[`docs/frontend-migration/03-contrato-api-frontend.md`](../docs/frontend-migration/03-contrato-api-frontend.md).
+Decisiones: [ADR-0013](../docs/adr/0013-reemplazo-dashboard-streamlit-por-spa.md) (reemplazo de
+Streamlit) y [ADR-0015](../docs/adr/0015-destilacion-del-sistema.md) (fusión, modelos lentos y
+EMD retirados).
 
 ## Diseño · "Mission Control"
 
-Lenguaje visual de **sala de control / instrumento de laboratorio**, no una migración 1:1
-del Streamlit:
+Lenguaje visual de **sala de control / instrumento de laboratorio**:
 
 - **Tema oscuro** (`#0A0E14`) con rejilla técnica sutil y glow por estado.
 - **Tipografía:** display **Chakra Petch** (títulos) + **JetBrains Mono** (telemetría). Los
@@ -18,8 +19,7 @@ del Streamlit:
   `DriftGauge` para el C2ST AUC.
 - **Color señal:** cian (telemetría), esmeralda (normal), ámbar (warmup), rojo (anomalía).
 - **Legibilidad de datos volátiles:** los *top contributors* (explicabilidad) se **congelan en la
-  última anomalía** con su timestamp — no parpadean cada ventana; los tiles del detector lento
-  muestran `— off` / `calibrando` / valor en vez de un `0.000` ambiguo.
+  última anomalía** con su timestamp — no parpadean cada ventana.
 - Tokens centralizados en `tailwind.config.ts` (reemplazan al morado/blanco genérico anterior).
 
 ## Requisitos
@@ -55,14 +55,17 @@ npm run dev                 # http://localhost:5173
 - **`src/hooks/useAnomalyStream.tsx`** — WebSocket con reconexión (backoff + jitter),
   heartbeat, detección de *staleness* y ring buffers; expuesto vía `useSyncExternalStore`.
 - **`src/hooks/*`** — wrappers de TanStack Query para el REST.
-- **`src/store/fusionDraftStore.ts`** — borrador de fusión (Zustand, persistente).
-- **`src/lib/`** — utilidades puras: `fusion.ts` (reimplementación de las 4 estrategias),
-  `ringBuffer.ts`, `kde.ts`, `status.ts`, `format.ts`, `constants.ts`.
+- **`src/hooks/useSpectrogram.ts`** — espectrograma mel de un evento, bajo demanda.
+- **`src/hooks/useDetector.ts`** — reinicio del detector (`POST /internal/reset-detector`).
+- **`src/lib/`** — utilidades puras: `ringBuffer.ts`, `kde.ts`, `status.ts`, `format.ts`,
+  `constants.ts`.
 - **`src/components/`** — `charts/` (uPlot + Recharts), `common/` (incl. `ScoreCard`,
-  `SystemBanner`, `DriftGauge`, `StatusChip`, `ConnectionIndicator`, `ConfirmDialog`),
-  `fusion/`, `events/`, `similarity/`.
-- **`src/pages/`** — `LiveMonitor`, `EventFeed`, `SimilaritySearch`, `OfflineAnalysis`
-  (cargadas con `React.lazy`).
+  `SystemBanner`, `DriftGauge`, `StatusChip`, `ConnectionIndicator`, `ConfirmDialog`,
+  `BBoxChip` "Movimiento principal"), `events/` (`EventCard` con espectrograma), `similarity/`.
+- **`src/pages/`** — `LiveMonitor`, `EventFeed`, `SimilaritySearch` (cargadas con `React.lazy`).
+
+> `zustand` sigue en `package.json` sin uso: quitarlo (`npm uninstall zustand`) requiere
+> regenerar `package-lock.json` contra el registro npm privado del proyecto.
 
 ## Despliegue en producción
 

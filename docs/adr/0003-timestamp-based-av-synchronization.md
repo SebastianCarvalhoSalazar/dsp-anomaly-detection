@@ -1,6 +1,6 @@
 # ADR-0003: Sincronización audio-video por timestamp
 
-- **Estado:** Aceptado
+- **Estado:** Aceptado — modificado por [ADR-0014](0014-nucleo-de-deteccion-funcional.md): la hora de cada ventana es la de captura y el frame se busca con `max_delta`
 - **Fecha:** 2026-06-21
 - **Decisores:** Equipo del proyecto
 - **Fase:** 1

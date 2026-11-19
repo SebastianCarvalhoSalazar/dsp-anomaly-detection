@@ -1,6 +1,6 @@
 # ADR-0008: Política de refit sensible a drift
 
-- **Estado:** Aceptado
+- **Estado:** Aceptado — opcional y apagado por defecto (`ENABLE_DRIFT`, [ADR-0014](0014-nucleo-de-deteccion-funcional.md))
 - **Fecha:** 2026-06-21
 - **Decisores:** Equipo del proyecto
 - **Fase:** 3

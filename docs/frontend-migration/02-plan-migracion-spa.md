@@ -1,5 +1,11 @@
 # 02 — Plan de migración a SPA (React + TypeScript + Vite)
 
+> **Documento histórico.** Plan y análisis de la migración Streamlit → SPA, ya completada:
+> Streamlit se retiró en [ADR-0015](../adr/0015-destilacion-del-sistema.md), junto con la
+> fusión, los modelos lentos y el análisis EMD que aquí se mencionan. El contrato vigente con la
+> API está en [`03-contrato-api-frontend.md`](03-contrato-api-frontend.md).
+
+
 Plan para llevar el dashboard al siguiente nivel reemplazando Streamlit por una SPA desacoplada
 que consume la API existente. Ver el análisis del estado actual en
 [doc 01](01-analisis-dashboard-actual.md) y el contrato de API en

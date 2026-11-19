@@ -1,6 +1,6 @@
 # ADR-0014: Núcleo de detección funcional — umbral estable, eventos segmentados y componentes opcionales
 
-- **Estado:** Aceptado
+- **Estado:** Aceptado — [ADR-0015](0015-destilacion-del-sistema.md) retira además los componentes que aquí quedaban opcionales (detector de video, fusión, modelos lentos)
 - **Fecha:** 2026-11-18
 - **Decisores:** mantenedor del proyecto
 - **Fase:** plan de correcciones ([`docs/plan-correcciones.md`](../plan-correcciones.md))

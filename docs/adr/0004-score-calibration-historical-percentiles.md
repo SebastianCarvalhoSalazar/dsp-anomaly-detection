@@ -1,6 +1,6 @@
 # ADR-0004: Calibración de scores por percentiles históricos
 
-- **Estado:** Aceptado
+- **Estado:** Reemplazado por [ADR-0015](0015-destilacion-del-sistema.md) — el componente se retiró del código (documento histórico)
 - **Fecha:** 2026-06-21
 - **Decisores:** Equipo del proyecto
 - **Fase:** 2

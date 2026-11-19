@@ -1,115 +1,89 @@
-# Sistema Inteligente de Detección de Anomalías Audiovisuales
+# Sistema de Detección de Anomalías Acústicas en Tiempo Real
 
-Sistema Python para detección de anomalías en señales de audio y video en tiempo real, sin necesidad de datos etiquetados. Combina procesamiento digital de señales clásico (DSP), modelos no supervisados y embeddings de modelos preentrenados de última generación para detectar, clasificar y almacenar eventos anómalos con soporte de búsqueda por similitud.
+Sistema Python que escucha un lugar de forma continua, aprende cómo suena normalmente y
+registra como **evento** todo sonido fuera de lo habitual, sin datos etiquetados. Combina
+procesamiento digital de señales (wavelets, Transformada de Scattering), un detector no
+supervisado (Isolation Forest) y embeddings preentrenados (Wav2Vec 2.0 + DINOv2) para
+buscar eventos parecidos. La cámara aporta contexto: el frame del momento y cuánto
+movimiento había.
 
 ---
 
 ## Qué hace el sistema
 
-El sistema procesa continuamente audio del micrófono y video de la cámara para:
+1. **Extrae características** de cada ventana de audio (0.256 s) con wavelets, Scattering y
+   descriptores espectrales.
+2. **Detecta anomalías** con un Isolation Forest que se re-entrena en línea; un umbral fijo
+   por entrenamiento y 3 ventanas consecutivas confirman la anomalía.
+3. **Agrupa** las ventanas anómalas consecutivas en **un evento** con inicio, fin y duración.
+4. **Guarda el evento** (audio con contexto previo, frame del pico, metadatos) y su
+   **embedding multimodal** (Wav2Vec 2.0 + DINOv2) en un hilo aparte, sin frenar el audio.
+5. **Indexa** el embedding en FAISS para **buscar eventos similares**.
+6. **Transmite** el score de cada ventana al dashboard por WebSocket.
+7. **Expone** eventos, audio, frames, espectrograma mel y búsqueda por similitud vía API REST.
 
-1. **Extraer características** de cada ventana de audio usando wavelets y la Transformada de Scattering
-2. **Detectar anomalías** en tiempo real con Isolation Forest (sin supervisión)
-3. **Generar embeddings multimodales** cuando se confirma una anomalía, combinando audio (Wav2Vec 2.0) e imagen (DINOv2)
-4. **Persistir el evento** con su audio, frame de video, embedding y metadatos
-5. **Indexar el embedding** en una base vectorial FAISS para búsqueda por similitud
-6. **Transmitir el score** en tiempo real al dashboard via WebSocket
-7. **Exponer todo via API REST** para consulta, análisis offline con EMD y búsqueda semántica
-
----
-
-## v0.3 — Detección multimodal de fusión tardía
-
-A partir de la rama `feature/multimodal-fusion-drift-aware`, el sistema evoluciona
-de un detector unimodal de audio a un **detector multimodal de fusión tardía**.
-Las decisiones de arquitectura están documentadas como ADRs en
-[`docs/adr/`](docs/adr/) y el informe técnico en [`docs/REPORT.md`](docs/REPORT.md).
-
-```
-Audio ─► AudioProcessor ─► AnomalyDetector (audio) ─► audio_score ┐
-                                                                  ├─► Calibración ─► Fusión ─► combined_score
-Video ─► VideoFeatureExtractor ─► VideoAnomalyDetector ─► video_score ┘     (percentil)   (weighted/max/and/or)
-```
-
-Capacidades nuevas:
-
-- **Detectores independientes** de audio y video (`src/detection/`, `src/vision_detection/`)
-  sobre una base común correcta (`BaseAnomalyDetector`).
-- **Sincronización temporal** A/V por timestamp (`src/sync/`): cada ventana de audio se
-  empareja con el frame más cercano en el tiempo (no "el último frame").
-- **Calibración por percentiles** + **fusión configurable** (`src/fusion/`): Weighted
-  Average / Maximum / AND / OR, con `dominant_modality`.
-- **Refits sensibles a drift**, **snapshots de modelos** (auditoría) y **explicabilidad**
-  por z-score (`top_audio_features`/`top_video_features`).
-- **Doble horizonte** (modelo rápido/lento) opt-in vía `ENABLE_SLOW_MODELS`.
-
-Compatibilidad hacia atrás: el esquema de eventos migra solo (columnas nuevas nullable)
-y la decisión de gating sigue la ruta de audio establecida.
+Las decisiones de arquitectura están en [`docs/adr/`](docs/adr/); la evolución reciente,
+en [`docs/plan-correcciones.md`](docs/plan-correcciones.md) (núcleo corregido, ADR-0014) y
+[`docs/plan-destilacion.md`](docs/plan-destilacion.md) (módulos retirados, ADR-0015).
 
 ---
 
 ## Arquitectura general
 
-El sistema corre como **tres procesos Python independientes** que se comunican via HTTP:
+El sistema corre como **tres procesos independientes** que se comunican por HTTP:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     PROCESO PIPELINE                        │
+│                     PROCESO PIPELINE (Python)               │
 │                                                             │
-│  Micrófono ──► AudioProcessor ──► AnomalyDetector          │
-│                  (DSP features)    (Isolation Forest)       │
-│                                         │                   │
-│  Cámara ──────► MotionDetector          │ is_anomaly?       │
-│                  (MOG2 bboxes)          ▼                   │
-│                               MultimodalEncoder             │
-│                               (Wav2Vec2 + DINOv2)           │
-│                                         │                   │
-│                               EventStore + FAISSStore       │
-│                               + Database (SQLite)           │
+│  Micrófono ──► AudioProcessor ──► AnomalyDetector           │
+│                  (features DSP)    (Isolation Forest)       │
+│                                         │ is_anomaly        │
+│  Cámara ──► FrameRingBuffer             ▼                   │
+│              └► MotionDetector ──► EventSegmenter           │
+│                 (MOG2, mov. principal)  │ evento cerrado    │
+│                                         ▼                   │
+│                       EventWriter (hilo aparte):            │
+│                       EventStore + MultimodalEncoder        │
+│                       + FAISSStore + Database (SQLite)      │
 └─────────────────────────────┬───────────────────────────────┘
-                              │ POST /internal/score
+                              │ POST /internal/score (cada ventana)
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                     PROCESO API (FastAPI)                   │
 │                                                             │
-│  REST: GET /events/  GET /events/{id}  POST /search/similar │
+│  REST: /events/…  /events/{id}/spectrogram  /search/…       │
 │  WebSocket: /ws/stream  (broadcast en tiempo real)          │
 └─────────────────────────────┬───────────────────────────────┘
                               │ HTTP + WebSocket
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│            PROCESO DASHBOARD (SPA React · web/)            │
-│            (reemplaza al dashboard Streamlit)             │
+│            DASHBOARD (SPA React + TypeScript · web/)        │
 │                                                             │
-│  Live Monitor │ Event Feed │ Similarity Search │ EMD/Spec   │
+│        Monitor en vivo │ Eventos │ Búsqueda por similitud   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ### Flujo de datos
 
 ```
-ventana de audio (4096 samples, float32)
+ventana de audio (4096 muestras @ 16 kHz = 0.256 s, sin solapamiento, hora de captura)
   └─► AudioProcessor.process_window()
-        ├─ Scattering1D (Kymatio)      →  coeficientes (dinámico según J, Q)
+        ├─ Scattering1D (Kymatio)      →  234 coeficientes (J=8, Q=8)
         ├─ Wavelet energy (db4, l=7)   →    8 valores
-        ├─ RMS                         →    1 valor
-        └─ ZCR                         →    1 valor
-                                       + spectral (centroid, flatness, rolloff, bandwidth)
-                                       + delta features
-                                       = dynamic-dim FeatureVector
-        └─► AnomalyDetector.score()
-              └─► AnomalyResult (anomaly_score ∈ [0,1], is_anomaly)
-                    └─[si anomalía]
-                          ├─ Wav2Vec2(audio)  →  768-dim embedding
-                          ├─ DINOv2(frame)    →  768-dim embedding
-                          └─ concat + L2-norm →  1536-dim multimodal
-                                │
-                                ├─► eventos/<timestamp>/audio.wav
-                                ├─► eventos/<timestamp>/frame.jpg
-                                ├─► eventos/<timestamp>/embedding.npy
-                                ├─► eventos/<timestamp>/metadata.json
-                                ├─► FAISS IndexFlatIP (cosine similarity)
-                                └─► SQLite (metadata + faiss_index_id)
+        ├─ RMS, ZCR                    →    2 valores
+        ├─ spectral centroid/flatness/rolloff/bandwidth → 4 valores
+        └─ deltas (RMS, centroide, energía scattering)  → 3 valores   = 251 dims
+  └─► AnomalyDetector.score()   scaler → PCA(25) → IsolationForest (cadena congelada por fit)
+        └─► AnomalyResult (raw_score, anomaly_score ∈ [0,1], is_anomaly tras 3 ventanas)
+  └─► EventSegmenter: ventanas anómalas consecutivas → UN evento (cierre tras 2 s sin anomalía)
+        └─► EventWriter (hilo aparte)
+              ├─ eventos/<timestamp>/audio.wav      (pre-roll de ~3 s + evento)
+              ├─ eventos/<timestamp>/frame.jpg      (frame del pico)
+              ├─ eventos/<timestamp>/metadata.json
+              ├─ Wav2Vec2(audio) ⊕ DINOv2(frame) → 1536-dim → eventos/<timestamp>/embedding.npy
+              ├─► FAISS IndexFlatIP (similitud coseno)
+              └─► SQLite (metadata, inicio/fin/duración, faiss_index_id)
 ```
 
 ---
@@ -165,11 +139,11 @@ solapamiento** (`blocksize = window_size`): una ventana cada 0.256 s a 16 kHz.
 `DSPConfig.hop_size` y `AudioProcessor.segment_signal()` solo aplican al
 procesamiento offline de señales completas.
 
-### EMD — Descomposición en Modos Empíricos (análisis offline)
+### Espectrograma mel (por evento)
 
-La **Empirical Mode Decomposition** (PyEMD) descompone señales no lineales y no estacionarias en componentes intrínsecas llamadas **IMFs (Intrinsic Mode Functions)**, cada una con frecuencia instantánea propia. A diferencia de la FFT o wavelets, es completamente adaptativa: no requiere base predefinida.
-
-Se usa en análisis offline sobre los eventos almacenados para entender la estructura interna de las anomalías detectadas.
+Para inspeccionar un evento guardado, `GET /events/{id}/spectrogram` calcula bajo demanda
+el espectrograma mel en dB (`librosa`, 128 bandas) de su audio. El dashboard lo muestra en
+la tarjeta del evento con el botón **Espectrograma**. No interviene en la detección.
 
 ---
 
@@ -184,21 +158,24 @@ El detector usa **Isolation Forest** (`scikit-learn`), un algoritmo de detecció
 IsolationForest no soporta aprendizaje incremental. Se usa un protocolo de **buffer ring + refit periódico**:
 
 ```
-buffer = deque(maxlen=500)   # ventana deslizante
+buffer = deque(maxlen=500)   # vectores CRUDOS (sin normalizar)
 
 por cada ventana de audio:
-    buffer.append(feature_vector)
+    si no fitted:
+        buffer.append(x)
+        si len(buffer) == 500: fit(buffer)          # primer entrenamiento
+    si fitted:
+        score = cadena_congelada(x)                 # scaler → PCA → IF del último fit
+        si score no es anómalo: buffer.append(x)    # las anómalas quedan en cuarentena
+        si llegaron 200 ventanas nuevas: fit(buffer)
 
-    si len(buffer) == 500 y no fitted:
-        model.fit(buffer)    # primer entrenamiento
-        is_fitted = True
-
-    si fitted y samples_since_refit >= 200:
-        model.fit(buffer)    # reentrenamiento sobre los últimos 500 samples
-        samples_since_refit = 0
+fit(buffer): aprende scaler (z-score) → PCA(25) → IsolationForest
+             y fija el umbral = percentil 2 de los scores de ese buffer
 ```
 
-Esto aproxima el aprendizaje online: el modelo se adapta al perfil estadístico reciente de la señal, permitiendo que lo que era anómalo en un contexto deje de serlo en otro.
+El modelo se adapta al perfil reciente de la señal sin aprender las anomalías: solo entran
+al buffer las ventanas normales, salvo que una anomalía persista ~60 s y se acepte como
+nuevo normal.
 
 #### Normalización del score
 
@@ -229,15 +206,17 @@ Durante las primeras 500 ventanas (~128 s de audio a 16 kHz, ventanas de 4096), 
 
 ### PCA — Reducción de dimensionalidad
 
-Antes de alimentar el Isolation Forest, el vector de features (251 dimensiones) se reduce a **25 componentes** mediante **PCA** (`sklearn.decomposition.PCA`). Se ajusta junto con el IF en cada refit.
+Antes del Isolation Forest, el vector de 251 dimensiones se normaliza (z-score con la media
+y la desviación del buffer de entrenamiento) y se reduce a **25 componentes** con **PCA**.
+Scaler, PCA e IF se ajustan juntos en cada fit y se usan sin cambios hasta el siguiente.
+La normalización existe por el PCA, que es sensible a la escala; el Isolation Forest por sí
+solo no lo es.
 
 ```python
+Xz = (X - mean) / std             # estadísticas del buffer de entrenamiento
 pca = PCA(n_components=25)
-X_reduced = pca.fit_transform(X)  # 251 → 25 dims
-model.fit(X_reduced)
+model.fit(pca.fit_transform(Xz))  # 251 → 25 dims
 ```
-
-Empíricamente, 9 componentes capturan >99% de la varianza; 25 es un margen de seguridad que preserva señales débiles sin perder la eficiencia del IF. El scoring aplica `pca.transform()` sobre cada vector individual antes de `score_samples()`.
 
 ### C2ST — Detección de drift por Classifier Two-Sample Test
 
@@ -334,8 +313,10 @@ Esquema de la tabla `anomaly_events`:
 | Campo | Tipo | Descripción |
 |---|---|---|
 | `id` | INTEGER PK | ID autoincremental |
-| `timestamp` | DATETIME(tz) | Momento de detección (UTC) |
-| `anomaly_score` | FLOAT | Score normalizado [0,1] |
+| `timestamp` | DATETIME(tz) | Inicio del evento (hora de captura, UTC) |
+| `end_timestamp` | DATETIME(tz) | Fin del evento (nullable en eventos antiguos) |
+| `duration_s` | FLOAT | Duración en segundos (nullable en eventos antiguos) |
+| `anomaly_score` | FLOAT | Score normalizado [0,1] en el pico del evento |
 | `event_dir` | TEXT UNIQUE | Ruta al directorio del evento |
 | `faiss_index_id` | INTEGER | ID en el índice FAISS |
 | `audio_path` | TEXT | Ruta a `audio.wav` |
@@ -343,6 +324,10 @@ Esquema de la tabla `anomaly_events`:
 | `embedding_path` | TEXT | Ruta a `embedding.npy` |
 | `source_region_json` | TEXT | Bounding boxes de movimiento (JSON) |
 | `extra_json` | TEXT | Metadatos adicionales (JSON) |
+| `top_audio_features` | TEXT | Features de audio que más se desviaron en el pico (JSON) |
+
+Las columnas nuevas se añaden solas a bases existentes (migración nullable, ADR-0011). Una
+base creada con v0.3 puede conservar columnas de fusión/video ya retiradas; quedan sin uso.
 
 SQLAlchemy **síncrono** con `run_in_executor` en FastAPI: no requiere `aiosqlite` y es suficiente para el throughput de un MVP.
 
@@ -359,7 +344,7 @@ eventos/
 
 ---
 
-## Detección de movimiento en video
+## Movimiento en video (contexto del evento)
 
 `MotionDetector` usa **MOG2 (Mixture of Gaussians v2)** de OpenCV:
 
@@ -368,15 +353,20 @@ eventos/
 3. **Dilatación** → conecta regiones fragmentadas del mismo objeto
 4. **`findContours`** → extrae contornos del foreground
 5. Filtrado por `min_contour_area=500 px²` → descarta falsos positivos pequeños
-6. `boundingRect` sobre cada contorno → `BoundingBox(x, y, w, h, area, source_score=0.0)`
+6. `boundingRect` sobre cada contorno → `BoundingBox(x, y, w, h, area)`
 7. **Merge de cajas cercanas:** cajas cuyas aristas están a ≤`merge_gap` px se fusionan en una sola (default: 0 = solo cajas que se tocan/superponen). Una caja fusionada no puede superar `max_box_ratio` (40%) del área del frame, evitando mega-cajas.
-8. **Temporal weights (IoU tracking):** cada caja se compara con las del frame anterior por IoU. Cajas nuevas (IoU<0.3) reciben peso=1.0; persistentes (IoU≥0.3) reciben peso=0.5.
+8. **Novedad (IoU tracking):** cada caja se compara con las del frame anterior por IoU. Cajas nuevas (IoU<0.3) reciben `temporal_weight=1.0`; persistentes (IoU≥0.3), `0.5`.
+9. **Movimiento principal:** el pipeline calcula `motion_score = area_ratio × temporal_weight` y conserva la caja de mayor score (movimiento grande y nuevo primero).
 
 ```python
-result = motion_detector.detect(frame)
-# result → lista de BoundingBox con source_score = temporal_weight (asignado por el detector)
-# El pipeline luego calcula: source_score = anomaly_score × area_ratio × temporal_weight
+boxes = motion_detector.detect(frame)       # BoundingBox con temporal_weight
+# pipeline: b.motion_score = (b.area / frame_area) * b.temporal_weight → top-1
 ```
+
+El movimiento principal y `motion_energy` (fracción del frame cubierta por cajas) son
+**contexto visual**: no intervienen en la decisión y no indican qué produjo el sonido
+([ADR-0015](docs/adr/0015-destilacion-del-sistema.md)). Cada evento guarda el frame del
+momento de mayor score.
 
 ---
 
@@ -390,18 +380,16 @@ Base URL: `http://localhost:8000`
 | `GET` | `/events/{id}` | Detalle de un evento |
 | `GET` | `/events/{id}/audio` | Stream del archivo WAV |
 | `GET` | `/events/{id}/frame` | Stream del JPEG |
-| `GET` | `/events/{id}/frame/annotated` | Frame JPEG con bounding box de la fuente más probable (rectángulo rojo + label `source X.XXX`) |
-| `GET` | `/events/{id}/offline_analysis` | EMD + mel-spectrogram del audio del evento |
-| `DELETE` | `/events/{id}` | Elimina un evento (DB + filesystem; entrada FAISS queda huérfana) |
+| `GET` | `/events/{id}/frame/annotated` | Frame JPEG con la caja de movimiento principal (rectángulo rojo + label `motion X.XXX`) |
+| `GET` | `/events/{id}/spectrogram` | Espectrograma mel (dB) del audio del evento, calculado bajo demanda |
+| `DELETE` | `/events/{id}` | Elimina un evento (fila SQLite, archivos y su vector FAISS) |
 | `DELETE` | `/events/` | Elimina todos los eventos y resetea el índice FAISS |
 | `POST` | `/search/similar` | Upload audio/imagen → top-k eventos similares por cosine (máx. 10 MB) |
 | `GET` | `/search/similar/by-event/{id}` | Busca eventos similares a uno ya almacenado usando su embedding pre-computado. Instantáneo (no carga modelos). Excluye el evento fuente. |
-| `WS` | `/ws/stream` | WebSocket: push de `AnomalyScoreMessage` en tiempo real (incluye `motion_energy`, `source_score`, `drift_auc`, `top_drift_features`) |
+| `WS` | `/ws/stream` | WebSocket: push de `AnomalyScoreMessage` en tiempo real (score, umbral, estado, cajas con `motion_score`, `motion_energy`, `rms`, `top_audio_features`, `drift_auc`) |
 | `POST` | `/internal/score` | Usado internamente por el pipeline para broadcast WS |
 | `POST` | `/internal/reset-detector` | Señaliza al pipeline que resetee su `AnomalyDetector` |
 | `GET` | `/internal/reset-pending` | Polling del pipeline: retorna `{"pending": bool}` y limpia el flag |
-| `POST` | `/internal/fusion-config` | Dashboard → pipeline: fija `strategy`/`audio_weight`/`gates` de fusión en vivo (422 si estrategia inválida) |
-| `GET` | `/internal/fusion-config` | Config de fusión actual `{strategy, audio_weight, gates}` |
 | `GET` | `/health` | Healthcheck: `{"status":"ok"}` |
 
 Documentación interactiva disponible en `http://localhost:8000/docs` (Swagger UI).
@@ -413,28 +401,23 @@ la variable `CORS_ORIGINS` (default `http://localhost:5173`, el dev server de Vi
 
 ## Dashboard web (SPA React · Mission Control)
 
-A partir de la rama `feature/frontend-spa`, el dashboard principal es una **SPA
-desacoplada en React + TypeScript + Vite** en [`web/`](web/), que consume la API
-(REST + WebSocket) y reemplaza al dashboard Streamlit. Decisión:
-[ADR-0013](docs/adr/0013-reemplazo-dashboard-streamlit-por-spa.md); plan y contrato en
-[`docs/frontend-migration/`](docs/frontend-migration/).
+El dashboard es una **SPA en React + TypeScript + Vite** en [`web/`](web/) que consume la
+API (REST + WebSocket). Decisión: [ADR-0013](docs/adr/0013-reemplazo-dashboard-streamlit-por-spa.md);
+contrato con la API en [`docs/frontend-migration/03-contrato-api-frontend.md`](docs/frontend-migration/03-contrato-api-frontend.md).
 
-**Lenguaje visual "Mission Control":** tema oscuro de sala de control, tipografía técnica
-(Chakra Petch + JetBrains Mono), telemetría en mono tabular, traza tipo osciloscopio y un
-estado de sistema inequívoco (NOMINAL / CALIBRANDO / ANOMALÍA).
+**Lenguaje visual "Mission Control":** tema oscuro, tipografía técnica (Chakra Petch +
+JetBrains Mono), telemetría en mono tabular y un estado de sistema inequívoco (NOMINAL /
+CALIBRANDO / ANOMALÍA).
 
-Mejoras clave sobre Streamlit:
+| Página | Contenido |
+|---|---|
+| **Monitor en vivo** | Score y umbral en tiempo real (uPlot), estado del detector, motion energy, drift AUC (si `ENABLE_DRIFT`), RMS, distribución KDE de scores, movimiento principal, *top contributors* de la última anomalía; botones "Reiniciar historial" y "Reiniciar detector" (con confirmación) |
+| **Eventos** | Tarjetas con score, frame anotado, audio y **espectrograma** bajo demanda; eliminar uno o todos |
+| **Búsqueda** | Subir audio o imagen, o elegir un evento guardado (embedding precalculado, instantáneo); resultados por similitud coseno |
 
-- **Tiempo real event-driven** (`useAnomalyStream`): sin polling de página; WebSocket con
-  reconexión (backoff + jitter), heartbeat y detección de *staleness* → indicador de
-  conexión honesto (ya no "siempre conectado").
-- **Estado de fusión persistente** entre navegación (Zustand); estrategias de fusión
-  reimplementadas en TS (sin acoplar `src.fusion`); el `combined_score` del backend sigue
-  siendo la fuente autoritativa.
-- **Acciones destructivas con confirmación**, accesibilidad (WCAG AA, `prefers-reduced-motion`)
-  y diseño mobile-first.
-- Gráficos ligeros: **uPlot** (streaming) + **Recharts** (KDE / RMS / IMF / heatmap),
-  con *code-splitting* por ruta.
+Tiempo real *event-driven* (`useAnomalyStream`): WebSocket con reconexión (backoff +
+jitter), heartbeat y detección de *staleness*. Estado de servidor con TanStack Query.
+Accesibilidad WCAG AA y `prefers-reduced-motion`.
 
 ```bash
 cd web
@@ -447,118 +430,33 @@ Requiere la API con CORS habilitado (`CORS_ORIGINS`). Detalle en [`web/README.md
 
 ---
 
-## Dashboard Streamlit (legacy · en decomisión)
-
-> El dashboard Streamlit permanece operativo como referencia hasta confirmar la paridad del
-> SPA (fase F8 del plan de migración). Se eliminará junto con `streamlit`/`plotly` una vez
-> validado. Cuatro páginas accesibles desde el sidebar:
-
-### Live Monitor
-- Indicadores en tiempo real: anomaly score, estado del detector, fase de calentamiento, **motion energy**, **Drift AUC** (C2ST: 0.5 = sin drift, 1.0 = drift total)
-- **Top drift features**: caption con ⚠️ mostrando las 3 features más relevantes del drift detectado (e.g., `scat_45, wavelet_band_5, spectral_centroid`)
-- Chip **"Fuente probable"**: coordenadas y `source_score` de la caja top-1 que correlaciona con la anomalía
-- **Historial de scores** con overlay del umbral adaptativo (percentil 98 de scores normalizados [0,1], línea punteada)
-- **Amplitud RMS** (últimas 256 ventanas) con Plotly
-- **Distribución de scores (KDE)**: densidad estimada por kernel gaussiano (`scipy.stats.gaussian_kde`) de los scores recientes, con línea vertical del umbral adaptativo
-- Actualización automática cada segundo via WebSocket
-- Botón **Reiniciar historial**: limpia los gráficos de la sesión actual
-- Botón **Reiniciar detector**: envía señal al pipeline para resetear el Isolation Forest (reinicia warmup)
-
-### Event Feed
-- Lista de eventos con filtros por score mínimo y orden
-- Reproducción de audio (`st.audio`) y visualización de frame anotado (con bounding box de fuente dibujado) por evento
-- Botón **Eliminar evento** por cada evento individual
-- Botón **Borrar todo**: elimina todos los eventos, filesystem y FAISS
-
-### Similarity Search
-- **Dos modos de búsqueda:**
-  - 📁 **Subir archivo**: upload de audio o imagen → encoding on-the-fly (puede tardar ~60s la primera vez)
-  - 📋 **Evento existente**: seleccionar un evento guardado → usa su embedding pre-computado → **respuesta instantánea** sin carga de modelos
-- Resultados en grid con score de similitud coseno
-- Frames mostrados con bounding box de fuente anotado
-- Tarjeta de previsualización del evento de consulta (modo evento existente)
-
-### Offline Analysis
-- Selección de evento guardado
-- Descomposición EMD: gráfica de cada IMF con `plotly` (subplots)
-- Mel-spectrogram en escala dB con `plotly` heatmap
-
----
-
 ## Estructura del proyecto
 
 ```
-dsp-idea/
+dsp-anomaly-detection/
 ├── src/
-│   ├── dsp/
-│   │   ├── config.py          # DSPConfig (window_size, J, Q, wavelet, etc.)
-│   │   ├── types.py           # FeatureVector dataclass
-│   │   └── processor.py       # AudioProcessor (Scattering + Wavelet + RMS/ZCR)
-│   ├── detection/
-│   │   ├── config.py          # DetectorConfig (buffer_size, refit_every, etc.)
-│   │   ├── types.py           # AnomalyResult dataclass
-│   │   └── detector.py        # AnomalyDetector (IsolationForest, thread-safe)
-│   ├── storage/
-│   │   ├── config.py          # StorageConfig (paths, embedding_dim)
-│   │   ├── models.py          # SQLAlchemy ORM: AnomalyEvent
-│   │   ├── db.py              # Database (SQLite, sync)
-│   │   ├── event_store.py     # EventStore (filesystem: WAV, JPEG, NPY, JSON)
-│   │   └── faiss_store.py     # FAISSStore (IndexFlatIP, L2-norm, thread-safe)
-│   ├── api/
-│   │   ├── main.py            # create_app() factory (inyección de dependencias)
-│   │   ├── schemas.py         # Pydantic models para request/response
-│   │   ├── dependencies.py    # get_db(), get_faiss_store(), get_event_store()
-│   │   └── routers/
-│   │       ├── events.py      # CRUD eventos + offline analysis (EMD)
-│   │       ├── search.py      # POST /search/similar + GET /search/similar/by-event/{id}
-│   │       └── websocket.py   # WS /ws/stream + POST /internal/score
-│   ├── embeddings/
-│   │   ├── config.py          # EmbeddingConfig (model IDs, dims, device)
-│   │   ├── audio_encoder.py   # AudioEncoder (Wav2Vec2, lazy load, offline-first)
-│   │   ├── image_encoder.py   # ImageEncoder (DINOv2, lazy load, offline-first)
-│   │   └── encoder.py         # MultimodalEncoder (concat + L2-norm → 1536-dim)
-│   ├── vision/
-│   │   ├── config.py          # VisionConfig (MOG2 params, min_contour_area, merge_gap, max_box_ratio)
-│   │   ├── types.py           # BoundingBox (con source_score), MotionResult dataclasses
-│   │   ├── motion.py          # MotionDetector (MOG2 + morfología + contornos + merge + IoU temporal)
-│   │   └── capture.py         # FrameCapture (OpenCV, context manager)
-│   ├── dashboard/
-│   │   ├── api_client.py      # APIClient (httpx sync)
-│   │   ├── app.py             # Streamlit entry point + navegación
-│   │   └── pages/
-│   │       ├── live_monitor.py
-│   │       ├── event_feed.py
-│   │       ├── similarity_search.py
-│   │       └── offline_analysis.py
-│   └── pipeline.py            # Orquestador: loop principal audio+video+anomalía
+│   ├── dsp/                   # AudioProcessor (Scattering + wavelet + RMS/ZCR + espectrales + deltas), DSPConfig
+│   ├── detection/             # BaseAnomalyDetector (scaler→PCA→IF, umbral por fit, cuarentena),
+│   │                          #   AnomalyDetector, DetectorConfig, SnapshotStore (opcional)
+│   ├── events/                # EventSegmenter (un evento por anomalía) + EventWriter (hilo aparte)
+│   ├── embeddings/            # Wav2Vec2 + DINOv2 → 1536-dim (carga lazy, offline-first)
+│   ├── storage/               # EventStore (WAV/JPEG/NPY/JSON), Database (SQLite), FAISSStore
+│   ├── vision/                # FrameCapture, MotionDetector (MOG2 + merge + IoU), BoundingBox
+│   ├── sync/                  # FrameRingBuffer: frame más cercano a la hora de captura del audio
+│   ├── api/                   # FastAPI: main.py (create_app), schemas.py, routers/ (events, search, websocket)
+│   └── pipeline.py            # Orquestador: captura → features → detector → eventos → API
 ├── web/                       # Dashboard SPA (React + TS + Vite) — "Mission Control"
-│   ├── src/
-│   │   ├── api/               # cliente tipado (types, client, endpoints, queryKeys, mediaUrls)
-│   │   ├── hooks/             # useAnomalyStream (WS) + hooks TanStack Query
-│   │   ├── store/             # fusionDraftStore (Zustand, persistente)
-│   │   ├── lib/               # fusion, ringBuffer, kde, status, format, constants
-│   │   ├── components/        # charts/ · common/ · fusion/ · events/ · similarity/
-│   │   ├── pages/             # LiveMonitor · EventFeed · SimilaritySearch · OfflineAnalysis
-│   │   └── layout/            # AppShell, NavBar
-│   ├── package.json
-│   ├── vite.config.ts · tailwind.config.ts · tsconfig.json
-│   └── README.md
-├── tests/
-│   ├── conftest.py            # OMP_NUM_THREADS=1 (fix segfault macOS)
-│   ├── test_dsp.py
-│   ├── test_detection.py
-│   ├── test_storage.py
-│   ├── test_api.py
-│   ├── test_embeddings.py
-│   ├── test_vision.py
-│   ├── test_dashboard.py
-│   ├── test_pipeline.py
-│   └── test_sample.py
-├── doc/
-│   ├── idea.md                # Especificación original del proyecto
-│   └── ...                    # Papers de referencia
-├── pyproject.toml
-├── poetry.lock
+│   └── src/                   # api/ · hooks/ · lib/ · components/ · pages/ (LiveMonitor, EventFeed,
+│                              #   SimilaritySearch) · layout/
+├── scripts/
+│   └── replay.py              # Banco offline: escenarios con verdad conocida + huella de detección
+├── tests/                     # pytest, sin micrófono ni cámara (arrays sintéticos)
+├── docs/
+│   ├── adr/                   # Decisiones de arquitectura (MADR)
+│   ├── architecture/          # Visión general de la arquitectura vigente
+│   ├── plan-correcciones.md   # Núcleo corregido (ADR-0014): plan, bitácora, resultados
+│   └── plan-destilacion.md    # Módulos retirados (ADR-0015): plan, bitácora, resultados
+├── pyproject.toml · poetry.lock
 └── .env.example
 ```
 
@@ -566,11 +464,14 @@ dsp-idea/
 
 ## Requisitos del sistema
 
-- Python 3.11–3.12
-- macOS, Linux o Windows (con WSL2 recomendado para Linux)
+- Python 3.11–3.14 (ver `pyproject.toml`)
+- **PortAudio** (librería de sistema que usa `sounddevice`; sin ella el pipeline y sus tests
+  no cargan): `brew install portaudio` en macOS, `sudo apt-get install libportaudio2` en
+  Debian/Ubuntu
 - Micrófono y cámara (solo para el pipeline en tiempo real; los tests no los requieren)
 - ~1.5 GB de espacio para modelos HuggingFace en cache
 - Conexión a internet solo para la descarga inicial de modelos
+- Node.js para el dashboard web
 
 ---
 
@@ -580,7 +481,7 @@ dsp-idea/
 
 ```bash
 git clone <repo>
-cd dsp-idea
+cd dsp-anomaly-detection
 pip install poetry
 poetry install
 ```
@@ -591,7 +492,7 @@ poetry install
 cp .env.example .env
 ```
 
-Editar `.env` si se quieren cambiar los paths por defecto:
+Editar `.env` si se quieren cambiar los valores por defecto:
 
 ```env
 EVENTS_DIR=./eventos      # directorio donde se guardan los eventos
@@ -599,12 +500,9 @@ DB_PATH=./data/events.db  # base de datos SQLite
 FAISS_PATH=./data/faiss.index
 API_BASE_URL=http://localhost:8000
 CORS_ORIGINS=http://localhost:5173   # orígenes permitidos para el SPA (coma-separados)
-ENABLE_SLOW_MODELS=false             # true = activa el detector lento (doble horizonte)
-# Componentes que no deciden eventos — opcionales (ADR-0014):
+# Opcionales, apagados por defecto (no deciden eventos — ADR-0014):
 ENABLE_DRIFT=false                   # C2ST + refits sensibles a drift
 ENABLE_SNAPSHOTS=false               # guarda el modelo en disco en cada refit
-ENABLE_VIDEO_DETECTOR=false          # detector de video + calibración + fusión
-FUSION_GATES_DECISION=false          # la fusión (no el audio) decide los eventos
 # Segmentación de eventos:
 EVENT_RELEASE_S=2.0                  # silencio que cierra un evento
 EVENT_MAX_DURATION_S=60.0            # duración máxima de un evento
@@ -642,13 +540,13 @@ poetry run uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
 
 Verificar que está activa:
 ```bash
-curl http://localhost:8000/events/
-# → []
+curl http://localhost:8000/health
+# → {"status":"ok"}
 ```
 
 Documentación interactiva: `http://localhost:8000/docs`
 
-### Terminal 2 — Dashboard (SPA React · recomendado)
+### Terminal 2 — Dashboard web
 
 ```bash
 cd web
@@ -660,37 +558,20 @@ npm run dev                 # http://localhost:5173
 Requiere que la API tenga `CORS_ORIGINS` incluyendo el origen del SPA (default
 `http://localhost:5173`).
 
-<details><summary>Alternativa legacy — dashboard Streamlit</summary>
-
-```bash
-poetry run streamlit run src/dashboard/app.py   # http://localhost:8501
-```
-</details>
-
 ### Terminal 3 — Pipeline (requiere micrófono y cámara)
 
 ```bash
 poetry run python -m src.pipeline
 ```
 
-**Doble horizonte (detector rápido + lento):** el detector lento es opt-in. Para activar **ambos
-modos** define `ENABLE_SLOW_MODELS=true` — en línea:
-
-```bash
-ENABLE_SLOW_MODELS=true poetry run python -m src.pipeline
-```
-
-o en el `.env` de la raíz (se carga automáticamente vía `python-dotenv`). El detector lento tiene
-su propio warmup (buffer de 5000 ventanas), por lo que `slow_audio_score`/`slow_video_score`
-permanecen en `0.0` hasta que se entrena por primera vez.
-
 El pipeline:
-1. Abre el micrófono (dispositivo 0 por defecto)
-2. Abre la cámara (dispositivo 0 por defecto)
-3. Entra en la fase de calentamiento (~25s): acumula 200 ventanas de audio para entrenar el detector
-4. Comienza a detectar anomalías y actualizar el dashboard en tiempo real
+1. Abre el micrófono y la cámara (dispositivo 0 por defecto)
+2. Entra en la fase de calentamiento (~128 s): acumula 500 ventanas de audio y entrena el detector
+3. Detecta anomalías, agrupa cada una en un evento y actualiza el dashboard en tiempo real
 
-Para detener: `Ctrl+C`
+Al actualizar desde una versión anterior a ADR-0014, el estado guardado del detector se
+descarta una vez (vuelve a calentar). Para detener: `Ctrl+C` (los eventos pendientes se
+guardan antes de salir).
 
 ---
 
@@ -699,52 +580,50 @@ Para detener: `Ctrl+C`
 ### Ejecutar la suite completa
 
 ```bash
-poetry run pytest -v
-# 240 tests, ~9s
+poetry run pytest          # 224 tests
 ```
 
 ### Ejecutar por módulo
 
 ```bash
-poetry run pytest tests/test_dsp.py -v             # 21 tests — DSP features
-poetry run pytest tests/test_detection.py -v       # 26 tests — Isolation Forest + PCA + C2ST drift
-poetry run pytest tests/test_base_detector.py -v   #  9 tests — BaseAnomalyDetector (C1/C2/H1/H6 fixes)
-poetry run pytest tests/test_storage.py -v         # 36 tests — FAISS, SQLite, EventStore
-poetry run pytest tests/test_schema_migration.py -v#  2 tests — migración de esquema compat
-poetry run pytest tests/test_api.py -v             # 34 tests — FastAPI endpoints + WebSocket
-poetry run pytest tests/test_embeddings.py -v      # 19 tests — encoders multimodales (mockeados)
-poetry run pytest tests/test_vision.py -v          # 34 tests — MOG2, IoU, temporal weights, box merge
-poetry run pytest tests/test_video_detection.py -v #  6 tests — detector de video (sin PCA)
-poetry run pytest tests/test_sync.py -v            #  8 tests — alineación temporal A/V
-poetry run pytest tests/test_calibration.py -v     #  4 tests — calibración por percentiles
-poetry run pytest tests/test_fusion.py -v          #  9 tests — estrategias de fusión
-poetry run pytest tests/test_drift_refit.py -v     #  6 tests — drift-aware refit, snapshots, explicabilidad
-poetry run pytest tests/test_dashboard.py -v       # 20 tests — APIClient + dashboard pages
-poetry run pytest tests/test_pipeline.py -v        #  6 tests — pipeline orchestration
+poetry run pytest tests/test_dsp.py                  # 21 — features DSP
+poetry run pytest tests/test_detection.py            # 26 — Isolation Forest, PCA, drift
+poetry run pytest tests/test_base_detector.py        #  9 — BaseAnomalyDetector (cuarentena, calibración, persistencia)
+poetry run pytest tests/test_detection_regressions.py #  4 — warmup limpio, anomalía sostenida, nuevo normal, falsas alarmas
+poetry run pytest tests/test_drift_refit.py          #  6 — refits por drift, snapshots, explicabilidad
+poetry run pytest tests/test_events.py               #  9 — segmentación de eventos y escritor asíncrono
+poetry run pytest tests/test_storage.py              # 40 — FAISS, SQLite, EventStore
+poetry run pytest tests/test_schema_migration.py     #  3 — compatibilidad de esquema (v0.2 y v0.3)
+poetry run pytest tests/test_api.py                  # 37 — endpoints REST + WebSocket
+poetry run pytest tests/test_embeddings.py           # 19 — encoders (mockeados)
+poetry run pytest tests/test_vision.py               # 29 — MOG2, merge, IoU, movimiento principal
+poetry run pytest tests/test_sync.py                 #  7 — frame más cercano por hora de captura
+poetry run pytest tests/test_pipeline.py             # 14 — process_window, eventos, hora de captura
 ```
 
-Todos los tests usan datos simulados (arrays numpy sintéticos, frames aleatorios, modelos mockeados). No requieren micrófono, cámara ni modelos descargados.
-
-### Smoke test del pipeline DSP sin hardware
+Todos los tests usan datos simulados (arrays numpy sintéticos, frames aleatorios, modelos
+mockeados). No requieren micrófono, cámara ni modelos descargados; sí la librería PortAudio.
 
 ```bash
-poetry run python - <<'EOF'
-from src.dsp import AudioProcessor
-from src.detection import AnomalyDetector
-import numpy as np
-
-proc = AudioProcessor()
-det = AnomalyDetector()
-signal = np.random.randn(16000 * 10).astype(np.float32)  # 10s sintéticos
-
-for window in proc.segment_signal(signal):
-    feat = proc.process_window(window)
-    result = det.score(feat)
-    if result.window_index % 20 == 0 or result.is_anomaly:
-        status = "WARMUP" if not result.is_fitted else ("ANOMALY" if result.is_anomaly else "ok")
-        print(f"win={result.window_index:3d}  score={result.anomaly_score:.3f}  [{status}]")
-EOF
+cd web && npm test         # tests del dashboard (Vitest)
+cd web && npm run build    # typecheck + build
 ```
+
+### Banco de reproducción offline (sin hardware)
+
+`scripts/replay.py` pasa audio sintético —o un WAV propio— por `Pipeline.process_window`,
+el mismo camino que en vivo, con embeddings simulados y almacenamiento temporal:
+
+```bash
+poetry run python -m scripts.replay --scenario events   # 8 min con 7 sonidos conocidos
+poetry run python -m scripts.replay --scenario quiet    # 15 min de fondo (falsas alarmas)
+poetry run python -m scripts.replay --wav grabacion.wav # WAV mono de 16 kHz, sin verdad conocida
+```
+
+Reporta, por sonido insertado, si se detectó, cuántos eventos generó y qué parte de sus
+ventanas cubrió; además falsas alarmas por hora, tiempo por ventana, ventanas perdidas en una
+cola simulada y una **huella** (`flags_sha1`, `scores_sha1`) que permite comprobar que un
+cambio no altera las decisiones del detector.
 
 ---
 
@@ -754,8 +633,7 @@ EOF
 |---|---|---|---|
 | DSP | PyWavelets | ^1.9 | Wavelet DWT, energía por escala |
 | DSP | Kymatio | ^0.3 | Scattering Transform 1D |
-| DSP | librosa | ^0.11 | Mel-spectrogram (análisis offline) |
-| DSP | PyEMD | ^1.9 | EMD offline sobre eventos |
+| DSP | librosa | ^0.11 | Espectrograma mel de los eventos |
 | ML | scikit-learn | ^1.8 | IsolationForest |
 | DL | PyTorch | ^2.11 | Backend de modelos |
 | DL | Transformers | ^5.5 | Wav2Vec2, DINOv2 |
@@ -771,11 +649,9 @@ EOF
 | Frontend SPA | Vite | ^5 | Build y dev server del SPA |
 | Frontend SPA | Tailwind CSS | ^3 | Estilos (tema "Mission Control") |
 | Frontend SPA | TanStack Query | ^5 | Estado de servidor (REST) |
-| Frontend SPA | Zustand | ^4 | Estado de fusión (persistente) |
 | Frontend SPA | uPlot / Recharts | ^1 / ^2 | Gráficos realtime / estáticos |
 | Frontend SPA | Vitest + MSW | ^2 | Tests del SPA |
-| Frontend (legacy) | Streamlit + Plotly | ^1.56 / ^6.6 | Dashboard anterior (en decomisión) |
-| HTTP | httpx | — | Cliente sync en dashboard Streamlit |
+| HTTP | httpx | — | Notificación pipeline → API |
 
 ---
 
@@ -816,7 +692,7 @@ Esto evita penalizar el arranque del pipeline en ejecuciones normales (offline-f
 
 ### WAV con subtype IEEE_FLOAT
 
-`soundfile` usa PCM_16 por defecto, que **recorta** amplitudes fuera de `[-1, 1]`. Las señales de audio del pipeline pueden tener valores de mayor amplitud (no normalizadas). Se fuerza `subtype='FLOAT'` para preservar el rango completo float32, necesario para reproducir fielmente los eventos y para que el análisis EMD offline sea correcto.
+`soundfile` usa PCM_16 por defecto, que **recorta** amplitudes fuera de `[-1, 1]`. Las señales de audio del pipeline pueden tener valores de mayor amplitud (no normalizadas). Se fuerza `subtype='FLOAT'` para preservar el rango completo float32, necesario para reproducir fielmente los eventos y calcular bien su espectrograma.
 
 ### conftest.py con OMP_NUM_THREADS=1
 
@@ -830,11 +706,13 @@ En macOS, PyTorch y OpenCV ambos linkan contra el framework Accelerate/OpenMP. C
 |---|---|---|
 | Sin GPU | Todo corre en CPU por defecto | Cambiar `device='cuda'` en `EmbeddingConfig` si hay GPU disponible |
 | FAISS no distribuido | Índice en un solo archivo local | Migrar a Qdrant para escalado horizontal |
-| Source correlation heurística | `source_score` usa IoU temporal + área ratio; no hay beamforming real | Audio-based localization con array de micrófonos |
-| Validar fusión como gating en datos reales | El gating por fusión existe (`FUSION_GATES_DECISION`) pero está off por defecto | Medir FP/FN con datos etiquetados antes de activarlo por defecto |
+| Sin localización de la fuente | El "movimiento principal" es solo área × novedad; no indica qué produjo el sonido | Localización acústica con un array de micrófonos |
+| Embeddings de audio entrenados con voz | Wav2Vec2-base se preentrenó con habla; la búsqueda de sonidos ambientales no está medida | Medir con datos etiquetados; evaluar modelos entrenados en AudioSet |
+| Refit dentro del loop de audio | Cada ~200 ventanas el fit tarda 0.2–0.3 s; hoy lo absorbe la cola sin perder audio | Entrenar en un hilo aparte reutilizando el swap atómico existente |
 
 > **Resuelto en v0.3:** sincronización audio-video por timestamp ([ADR-0003](docs/adr/0003-timestamp-based-av-synchronization.md)) y `motion_energy` acotado a `[0,1]`.
-> **Resuelto en v0.3.1:** integridad FAISS↔SQLite cross-proceso (`IndexIDMap2` con IDs = PK + escritura atómica + file-lock; hallazgos C3/C4), path traversal en endpoints de streaming (H2), rutas de evento absolutas (H3), y gating por fusión disponible tras flag. El detalle de riesgos y trabajo futuro está en [`docs/REPORT.md`](docs/REPORT.md).
+> **Resuelto en v0.3.1:** integridad FAISS↔SQLite cross-proceso (`IndexIDMap2` con IDs = PK + escritura atómica + file-lock; hallazgos C3/C4), path traversal en endpoints de streaming (H2) y rutas de evento absolutas (H3).
+> **Resuelto después:** núcleo de detección corregido —warmup, umbral, un evento por anomalía, hora de captura— ([ADR-0014](docs/adr/0014-nucleo-de-deteccion-funcional.md)); fusión multimodal, doble horizonte, EMD y Streamlit retirados ([ADR-0015](docs/adr/0015-destilacion-del-sistema.md)).
 
 ---
 

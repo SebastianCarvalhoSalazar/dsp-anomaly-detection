@@ -1,6 +1,6 @@
 # ADR-0002: Refactor a `BaseAnomalyDetector` compartido (fix C1/C2/H1)
 
-- **Estado:** Aceptado
+- **Estado:** Aceptado — modificado por [ADR-0014](0014-nucleo-de-deteccion-funcional.md): el normalizador Welford (fix C1) se reemplaza por un scaler congelado por fit
 - **Fecha:** 2026-06-21
 - **Decisores:** Equipo del proyecto
 - **Fase:** 0
