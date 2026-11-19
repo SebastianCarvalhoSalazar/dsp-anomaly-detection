@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import cv2
 import numpy as np
 import pytest
 import soundfile as sf
@@ -252,11 +253,11 @@ def test_annotated_frame_with_boxes(
     boxes = [
         {
             "x": 10, "y": 10, "w": 40, "h": 30,
-            "source_score": 0.42,
+            "motion_score": 0.42,
         },
         {
             "x": 80, "y": 50, "w": 30, "h": 20,
-            "source_score": 0.18,
+            "motion_score": 0.18,
         },
     ]
     app = create_app(
@@ -275,6 +276,30 @@ def test_annotated_frame_with_boxes(
         # Annotated image should differ from raw
         raw = c.get(f"/events/{eid}/frame")
         assert len(resp.content) != len(raw.content)
+
+
+def _red_at(jpeg: bytes, x: int, y: int) -> bool:
+    img = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
+    b, g, r = (int(v) for v in img[y, x])
+    return r > 150 and b < 130
+
+
+@pytest.mark.parametrize("key", ["motion_score", "source_score"])
+def test_annotated_frame_draws_main_motion_box(client, tmp_stores, tmp_path, key):
+    """The box with the highest motion score is drawn. Events stored before
+    ADR-0015 use the old key "source_score" and must still annotate."""
+    db, faiss_store, event_store = tmp_stores
+    boxes = [
+        {"x": 10, "y": 20, "w": 40, "h": 30, key: 0.18},
+        {"x": 90, "y": 40, "w": 50, "h": 40, key: 0.42},   # main motion
+    ]
+    app = create_app(db=db, faiss_store=faiss_store, event_store=event_store)
+    with TestClient(app) as c:
+        eid = _insert_event_with_frame(db, event_store, tmp_path, boxes=boxes)
+        jpeg = c.get(f"/events/{eid}/frame/annotated").content
+    # Bottom edge of the winning box is red; the other box is not drawn.
+    assert _red_at(jpeg, 90 + 25, 40 + 40)
+    assert not _red_at(jpeg, 10 + 20, 20 + 30)
 
 
 # ---------------------------------------------------------------------------

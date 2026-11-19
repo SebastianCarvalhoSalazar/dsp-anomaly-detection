@@ -31,7 +31,7 @@ export interface BoundingBox {
   y: number;
   w: number;
   h: number;
-  source_score: number;
+  motion_score: number; // área × novedad (sin relación con el audio)
 }
 
 export interface AnomalyScoreMessage {

@@ -195,15 +195,14 @@ class MotionDetector:
     def assign_temporal_weights(
         self, boxes: list[BoundingBox],
     ) -> None:
-        """Set ``source_score`` on each box to a temporal weight.
+        """Set ``temporal_weight`` on each box.
 
         A box that overlaps significantly (IoU > 0.3) with a
         previous-frame box is considered *persistent* and receives
         weight 0.5.  A new box gets weight 1.0.
 
-        The pipeline will later multiply this weight by the area
-        ratio and anomaly score to produce the final
-        ``source_score``.
+        The pipeline multiplies this weight by the box's area ratio to
+        rank the frame's main motion (``motion_score``).
         """
         for box in boxes:
             best_iou = 0.0
@@ -212,7 +211,7 @@ class MotionDetector:
                 if iou > best_iou:
                     best_iou = iou
             # New box → 1.0; persistent → 0.5
-            box.source_score = (
+            box.temporal_weight = (
                 0.5 if best_iou > 0.3 else 1.0
             )
 

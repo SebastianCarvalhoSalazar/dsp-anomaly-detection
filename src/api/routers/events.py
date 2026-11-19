@@ -18,6 +18,12 @@ from src.storage.models import AnomalyEvent
 router = APIRouter(prefix="/events", tags=["events"])
 
 
+def _box_motion_score(box: dict) -> float:
+    """Main-motion score of a stored box. Events stored before ADR-0015 carry
+    the same ranking under the old key ``source_score``."""
+    return float(box.get("motion_score", box.get("source_score", 0)))
+
+
 def _event_to_response(event: AnomalyEvent) -> EventResponse:
     event_dir = Path(event.event_dir)
     return EventResponse(
@@ -144,14 +150,10 @@ async def get_annotated_frame(
 
         h, w = frame.shape[:2]
 
-        # Pick the single best box (highest source_score)
-        best = max(
-            boxes,
-            key=lambda b: b.get("source_score", 0),
-        )
+        best = max(boxes, key=_box_motion_score)
         bx, by = int(best["x"]), int(best["y"])
         bw, bh = int(best["w"]), int(best["h"])
-        ss = best.get("source_score", 0)
+        ss = _box_motion_score(best)
 
         colour = (60, 60, 230)  # red BGR
         cv2.rectangle(
@@ -162,7 +164,7 @@ async def get_annotated_frame(
             2,
         )
 
-        label = f"source {ss:.3f}"
+        label = f"motion {ss:.3f}"
         font = cv2.FONT_HERSHEY_SIMPLEX
         (tw, th), _ = cv2.getTextSize(
             label, font, 0.5, 1,

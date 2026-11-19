@@ -298,20 +298,13 @@ class Pipeline:
             self._last_motion_energy = min(
                 sum(b.area for b in boxes) / frame_area, 1.0
             )
-            # Source-score ranking (Option B):
-            # score = anomaly_score × area_ratio × temporal_weight
+            # Main motion: rank boxes by area_ratio × temporal_weight (large,
+            # new movement first) and keep the top one. Purely visual context;
+            # it is not correlated with the audio (ADR-0015).
             for b in boxes:
-                area_ratio = b.area / frame_area
-                b.source_score = (
-                    result.anomaly_score
-                    * area_ratio
-                    * b.source_score  # temporal weight
-                )
-            boxes.sort(
-                key=lambda b: b.source_score,
-                reverse=True,
-            )
-            boxes = boxes[:1]  # best match only
+                b.motion_score = (b.area / frame_area) * b.temporal_weight
+            boxes.sort(key=lambda b: b.motion_score, reverse=True)
+            boxes = boxes[:1]
         else:
             self._last_motion_energy *= 0.9  # decay
 
@@ -392,7 +385,7 @@ class Pipeline:
             {
                 "x": b.x, "y": b.y,
                 "w": b.w, "h": b.h,
-                "source_score": round(b.source_score, 4),
+                "motion_score": round(b.motion_score, 4),
             }
             for b in boxes
         ]
@@ -484,9 +477,7 @@ class Pipeline:
                     {
                         "x": b.x, "y": b.y,
                         "w": b.w, "h": b.h,
-                        "source_score": round(
-                            b.source_score, 4,
-                        ),
+                        "motion_score": round(b.motion_score, 4),
                     }
                     for b in boxes
                 ],

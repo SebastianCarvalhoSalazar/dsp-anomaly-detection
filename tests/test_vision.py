@@ -114,7 +114,7 @@ def test_temporal_weight_new_box():
         ),
     ]
     det.assign_temporal_weights(boxes)
-    assert boxes[0].source_score == 1.0
+    assert boxes[0].temporal_weight == 1.0
 
 
 def test_temporal_weight_persistent_box():
@@ -132,24 +132,25 @@ def test_temporal_weight_persistent_box():
         ),
     ]
     det.assign_temporal_weights(boxes)
-    assert boxes[0].source_score == 0.5
+    assert boxes[0].temporal_weight == 0.5
 
 
-def test_detect_assigns_source_score():
-    """detect() should set source_score on returned boxes."""
+def test_detect_assigns_temporal_weight():
+    """detect() should set temporal_weight on returned boxes."""
     config = VisionConfig(min_contour_area=100)
     det = MotionDetector(config)
     _warmup(det)
     boxes = det.detect(_frame_with_patch())
     if boxes:
         # First detection → new boxes → weight 1.0
-        assert boxes[0].source_score == 1.0
+        assert boxes[0].temporal_weight == 1.0
 
 
-def test_source_score_default_zero():
-    """BoundingBox created without source_score defaults to 0."""
+def test_weights_and_motion_score_default_zero():
+    """A BoundingBox created without scores defaults both to 0."""
     b = BoundingBox(x=0, y=0, w=10, h=10, area=100)
-    assert b.source_score == 0.0
+    assert b.temporal_weight == 0.0
+    assert b.motion_score == 0.0
 
 
 # ---------------------------------------------------------------------------

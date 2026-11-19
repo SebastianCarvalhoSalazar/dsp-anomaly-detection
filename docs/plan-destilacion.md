@@ -11,7 +11,7 @@
 | 0 — Línea base y huella de detección | ✅ Hecho | (este commit) |
 | 1 — EMD fuera, mel como detalle del evento | ✅ Hecho (SPA sin compilar aquí) | ver bitácora |
 | 2 — Retirar fusión, detector de video y modelos lentos | ✅ Hecho (SPA sin compilar aquí) | ver bitácora |
-| 3 — "Fuente probable" → "movimiento principal" | ⏳ | |
+| 3 — "Fuente probable" → "movimiento principal" | ✅ Hecho (SPA sin compilar aquí) | ver bitácora |
 | 4 — Retirar Streamlit (adelantado, antes del 2) | ✅ Hecho | ver bitácora |
 | 5 — Dependencias y código muerto | ⏳ | |
 | 6 — Documentación | ⏳ | |
@@ -106,3 +106,13 @@ Determinismo comprobado: dos corridas seguidas de `events` dan hashes e informe 
     nuevos" (diff de avisos antes/después, ignorando números de línea).
   - **Pendiente en el Mac:** `zustand` queda sin uso en `web/package.json`, pero quitarlo exige
     regenerar `package-lock.json` contra el registro npm privado (`npm uninstall zustand`).
+- **2026-11-19 · Paso 3** — `BoundingBox.source_score` se divide en `temporal_weight` (1.0
+  nueva / 0.5 persistente) y `motion_score = area_ratio × temporal_weight`. Se quita el factor
+  `anomaly_score`: es el mismo para todas las cajas de un frame, así que no cambiaba el ganador.
+  JSON de cajas y WebSocket usan la clave `motion_score`; `/events/{id}/frame/annotated` lee
+  `motion_score` con respaldo a `source_score` para eventos antiguos y rotula `motion X.XXX`.
+  SPA: el recuadro se llama "Movimiento principal".
+  - **Diferencia de comportamiento (solo visual):** durante el warmup el score de audio era 0,
+    todas las cajas empataban y ganaba la más grande; ahora gana la de mayor área × novedad.
+  - **Puerta:** huella idéntica; `pytest` 230 passed (+2: el recuadro correcto se dibuja con
+    la clave nueva y con la vieja, comprobado por color de píxel); `pylint` sin avisos nuevos.
