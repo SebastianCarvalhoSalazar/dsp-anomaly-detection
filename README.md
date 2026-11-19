@@ -224,10 +224,11 @@ model.fit(pca.fit_transform(Xz))  # 251 → 25 dims
 
 ### C2ST — Detección de drift por Classifier Two-Sample Test
 
-> **Opcional, apagado por defecto** (`ENABLE_DRIFT=true` para activarlo). El AUC
-> tiene un sesgo conocido: los buffers comparados se solapan (300 de 500 muestras
-> con refits cada 200), lo que lo empuja hacia 0.5 aunque haya drift. Ver
-> [ADR-0014](docs/adr/0014-nucleo-de-deteccion-funcional.md).
+> **Opcional, apagado por defecto** (`ENABLE_DRIFT=true` para activarlo). Los buffers
+> sucesivos se solapan (300 de 500 ventanas con refits cada 200); el test se calcula **solo
+> sobre las ventanas exclusivas de cada uno**. Antes se usaban los buffers completos y las
+> ventanas compartidas, con etiquetas opuestas, invertían el clasificador: con datos estables
+> el AUC daba ~0.85 (drift falso) y con drift fuerte y refits frecuentes caía a ~0.5.
 
 Para medir si la distribución de features está cambiando entre refits sucesivos, se usa un **Classifier Two-Sample Test (C2ST)**:
 
@@ -626,8 +627,8 @@ poetry run python -m scripts.replay --scenario quiet    # 15 min de fondo (falsa
 poetry run python -m scripts.replay --wav grabacion.wav # WAV mono de 16 kHz, sin verdad conocida
 ```
 
-Reporta, por sonido insertado, si se detectó, cuántos eventos generó y qué parte de sus
-ventanas cubrió; además falsas alarmas por hora, tiempo por ventana, ventanas perdidas en una
+Reporta, por sonido insertado, si se detectó, cuántos eventos generó, cuánto duró el evento
+guardado y qué parte de sus ventanas cubrió; además falsas alarmas por hora, tiempo por ventana, ventanas perdidas en una
 cola simulada y una **huella** (`flags_sha1`, `scores_sha1`) que permite comprobar que un
 cambio no altera las decisiones del detector. `flags_sha1` es comparable entre máquinas;
 `scores_sha1` solo en la misma máquina (los cálculos de punto flotante varían ligeramente según

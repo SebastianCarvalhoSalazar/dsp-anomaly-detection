@@ -74,8 +74,14 @@ Opción 3:
     vs adaptarse rápido); por eso el drift queda opcional.
   - El refit programado ocurre en la ventana siguiente a la que completa
     `refit_every` muestras nuevas.
-- **Riesgos y mitigaciones:** el C2ST tiene un sesgo conocido por buffers solapados
-  (confirmado: AUC 0.99 → 0.52 con drift sostenido); se documenta y queda opcional.
+- **Riesgos y mitigaciones:** el C2ST tenía un sesgo por buffers solapados (confirmado: AUC
+  0.99 → 0.52 con drift sostenido y refits frecuentes); se documentó y quedó opcional.
+  *Corregido después:* el mismo sesgo daba AUC ~0.85 con datos estables; el C2ST ahora usa solo
+  las filas exclusivas de cada buffer (ver [`plan-destilacion.md`](../plan-destilacion.md)).
+- **Debilidad conocida de la cuarentena:** un aumento intermitente y persistente del ruido de
+  fondo nunca alcanza `accept_after_windows` seguidas, así que no se acepta como nuevo normal y
+  produce falsas alarmas repetidas (reproducido: fondo 1.7× → 25 eventos en 8 min). Pendiente de
+  rediseño; mitigación inmediata: "Reiniciar detector".
 
 ## Notas de implementación
 
