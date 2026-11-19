@@ -115,3 +115,37 @@ def test_top_features_ranks_by_zscore():
     assert top
     assert top[0].startswith("feat_3")
     assert "σ" in top[0]
+
+
+# --------------------------------------------------------------------------- #
+# C2ST on non-overlapping rows (overlap bias fix)
+# --------------------------------------------------------------------------- #
+
+def _auc_after_each_refit(det, data):
+    aucs, last = [], det.get_drift_metrics()["refit_count"]
+    for fv in data:
+        det.score(fv)
+        m = det.get_drift_metrics()
+        if m["refit_count"] != last:
+            last = m["refit_count"]
+            aucs.append(m["drift_auc"])
+    return aucs
+
+
+def test_c2st_keeps_detecting_sustained_drift_with_frequent_refits():
+    """Buffers of 40 refitted every 10 windows share 30 rows. Before the fix
+    the shared rows (same vector, opposite labels) dragged the AUC to ~0.5
+    although the stream kept drifting."""
+    det = AnomalyDetector(_cfg(refit_every=10, enable_drift_detection=True))
+    aucs = _auc_after_each_refit(det, _ramp(200, seed=1))
+    later = aucs[2:]  # skip the initial fit and the first comparison
+    assert later and min(later) >= 0.9, aucs
+
+
+def test_c2st_stays_low_without_drift():
+    det = AnomalyDetector(_cfg(
+        buffer_size=200, refit_every=100, n_estimators=15,
+        enable_drift_detection=True,
+    ))
+    aucs = _auc_after_each_refit(det, _normals(800, seed=5))
+    assert aucs[1:] and max(aucs[1:]) < 0.75, aucs
