@@ -22,10 +22,17 @@ jobs:
 
       # sounddevice necesita PortAudio y opencv-python necesita libGL aunque
       # los tests no usen micrófono ni cámara (se importan a nivel de módulo).
+      # `import sounddevice` inicializa PortAudio, que falla si no hay servidor
+      # de audio: se levanta un PulseAudio con un sink nulo (sin dispositivos).
       - name: System libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libportaudio2 libgl1 libglib2.0-0
+          sudo apt-get install -y --no-install-recommends libportaudio2 libgl1 libglib2.0-0 pulseaudio
+
+      - name: Dummy audio server
+        run: |
+          pulseaudio -D --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=dummy
 
       - name: Install Poetry
         run: pipx install poetry
