@@ -12,7 +12,7 @@
 | 1 — EMD fuera, mel como detalle del evento | ✅ Hecho (SPA sin compilar aquí) | ver bitácora |
 | 2 — Retirar fusión, detector de video y modelos lentos | ⏳ | |
 | 3 — "Fuente probable" → "movimiento principal" | ⏳ | |
-| 4 — Retirar Streamlit | ⏳ | |
+| 4 — Retirar Streamlit (adelantado, antes del 2) | ✅ Hecho | ver bitácora |
 | 5 — Dependencias y código muerto | ⏳ | |
 | 6 — Documentación | ⏳ | |
 | Validación en el Mac del usuario (SPA + prueba real) | ⏳ pendiente | |
@@ -81,3 +81,10 @@ Determinismo comprobado: dos corridas seguidas de `events` dan hashes e informe 
   - **Limitación:** sin compilador de TypeScript en este entorno (las dependencias del SPA vienen
     de un registro npm privado): los cambios del SPA se revisaron a mano y quedan para la puerta
     en el Mac (`npm test`, `npm run build`).
+- **2026-11-19 · Paso 4 (adelantado)** — El Streamlit importaba `src.fusion` directamente:
+  retirar la fusión primero lo dejaba roto entre commits, y reescribirlo para borrarlo después
+  no tenía sentido. Se adelanta: se borran `src/dashboard/` y `tests/test_dashboard.py`
+  (las dependencias `streamlit`/`plotly` salen en el Paso 5).
+  - **Puerta:** huella idéntica; `pytest` 254 passed (salen 24 tests del cliente Streamlit);
+    `pylint` 8.72 (baja de 8.76 porque el código retirado puntuaba por encima de la media,
+    sigue ≥ línea base); imports OK.
