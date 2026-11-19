@@ -9,10 +9,9 @@ import librosa
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
-from PyEMD import EMD
 
 from src.api.dependencies import get_db, get_event_store, get_faiss_store
-from src.api.schemas import EventResponse, OfflineAnalysisResponse
+from src.api.schemas import EventResponse, SpectrogramResponse
 from src.storage import Database, EventStore, FAISSStore
 from src.storage.models import AnomalyEvent
 
@@ -240,32 +239,22 @@ async def clear_events(
     await anyio.to_thread.run_sync(faiss_store.clear)
 
 
-@router.get("/{event_id}/offline_analysis", response_model=OfflineAnalysisResponse)
-async def get_offline_analysis(
+@router.get("/{event_id}/spectrogram", response_model=SpectrogramResponse)
+async def get_spectrogram(
     event_id: int,
     db: Database = Depends(get_db),
     event_store: EventStore = Depends(get_event_store),
-) -> OfflineAnalysisResponse:
-    """Run EMD and compute mel spectrogram on the stored audio for an event."""
+) -> SpectrogramResponse:
+    """Mel spectrogram (dB) of an event's stored audio, computed on demand."""
     event = await anyio.to_thread.run_sync(lambda: db.get_event(event_id))
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    def _analyze() -> OfflineAnalysisResponse:
+    def _analyze() -> SpectrogramResponse:
         audio, sr = event_store.load_audio(Path(event.event_dir))
-        signal = audio.astype(np.float64)
-
-        emd = EMD()
-        imfs = emd.emd(signal)  # (n_imfs, time) or (time,) if single IMF
-        if imfs.ndim == 1:
-            imfs = imfs[np.newaxis, :]
-
         mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr)
         mel_db = librosa.power_to_db(mel_spec, ref=np.max)
-
-        return OfflineAnalysisResponse(
-            imfs=[row.tolist() for row in imfs],
-            n_imfs=len(imfs),
+        return SpectrogramResponse(
             sample_rate=sr,
             spectrogram=[row.tolist() for row in mel_db],
         )

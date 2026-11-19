@@ -4,7 +4,7 @@ import type {
   EventResponse,
   FusionConfig,
   Modality,
-  OfflineAnalysisResponse,
+  SpectrogramResponse,
   SimilarEventResponse,
 } from './types';
 
@@ -33,8 +33,8 @@ export const deleteEvent = (id: number): Promise<void> =>
 
 export const deleteAllEvents = (): Promise<void> => request('/events/', { method: 'DELETE' });
 
-export const getOfflineAnalysis = (id: number): Promise<OfflineAnalysisResponse> =>
-  request(`/events/${id}/offline_analysis`);
+export const getSpectrogram = (id: number): Promise<SpectrogramResponse> =>
+  request(`/events/${id}/spectrogram`);
 
 export const searchSimilarByEvent = (id: number, k = 5): Promise<SimilarEventResponse[]> =>
   request(`/search/similar/by-event/${id}${qs({ k })}`);

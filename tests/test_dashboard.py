@@ -177,27 +177,6 @@ def test_search_by_event_returns_empty():
 
 
 # ---------------------------------------------------------------------------
-# get_offline_analysis
-# ---------------------------------------------------------------------------
-
-def test_get_offline_analysis_calls_correct_url():
-    fake_analysis = {
-        "imfs": [[0.1, 0.2, 0.3]],
-        "n_imfs": 1,
-        "sample_rate": 16000,
-        "spectrogram": [[0.0, 1.0]],
-    }
-    with patch("src.dashboard.api_client.httpx.get") as mock_get:
-        mock_get.return_value = _mock_response(fake_analysis)
-        client = APIClient(base_url="http://testserver")
-        result = client.get_offline_analysis(3)
-
-    assert "http://testserver/events/3/offline_analysis" in mock_get.call_args[0][0]
-    assert result["n_imfs"] == 1
-    assert result["sample_rate"] == 16000
-
-
-# ---------------------------------------------------------------------------
 # delete_event
 # ---------------------------------------------------------------------------
 

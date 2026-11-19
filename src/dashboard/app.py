@@ -18,7 +18,7 @@ if _project_root not in sys.path:
 import streamlit as st
 
 from src.dashboard.api_client import APIClient
-from src.dashboard.pages import event_feed, live_monitor, offline_analysis, similarity_search
+from src.dashboard.pages import event_feed, live_monitor, similarity_search
 from src.dashboard.styles import inject_global_css
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
@@ -27,7 +27,6 @@ PAGES = {
     "Monitor en vivo": ("📡", live_monitor),
     "Eventos":         ("🗂️",  event_feed),
     "Búsqueda":        ("🔍", similarity_search),
-    "Análisis offline":("📊", offline_analysis),
 }
 
 

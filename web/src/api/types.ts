@@ -24,11 +24,9 @@ export interface SimilarEventResponse {
   cosine_similarity: number;
 }
 
-export interface OfflineAnalysisResponse {
-  imfs: number[][];
-  n_imfs: number;
+export interface SpectrogramResponse {
   sample_rate: number;
-  spectrogram: number[][];
+  spectrogram: number[][]; // mel en dB (bandas × frames)
 }
 
 export interface FusionConfig {

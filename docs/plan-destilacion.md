@@ -9,7 +9,7 @@
 | Paso | Estado | Commit |
 |---|---|---|
 | 0 — Línea base y huella de detección | ✅ Hecho | (este commit) |
-| 1 — EMD fuera, mel como detalle del evento | ⏳ | |
+| 1 — EMD fuera, mel como detalle del evento | ✅ Hecho (SPA sin compilar aquí) | ver bitácora |
 | 2 — Retirar fusión, detector de video y modelos lentos | ⏳ | |
 | 3 — "Fuente probable" → "movimiento principal" | ⏳ | |
 | 4 — Retirar Streamlit | ⏳ | |
@@ -71,3 +71,13 @@ Determinismo comprobado: dos corridas seguidas de `events` dan hashes e informe 
 
 - **2026-11-19 · Paso 0** — Rama reiniciada desde `main`. `scripts/replay.py` añade
   `flags_sha1` y `scores_sha1` al informe. Línea base registrada arriba.
+- **2026-11-19 · Paso 1** — `GET /events/{id}/offline_analysis` (EMD + mel) reemplazado por
+  `GET /events/{id}/spectrogram` (solo mel; `SpectrogramResponse {sample_rate, spectrogram}`).
+  SPA: se borran la página "Análisis offline", `ImfChart` y la ruta `/offline`; la tarjeta de
+  evento gana un botón "Espectrograma" que lo carga bajo demanda (`useSpectrogram`, reutiliza
+  `Heatmap`). En Streamlit se quita la página EMD para no dejarla rota hasta el Paso 4.
+  - **Puerta:** huella `events` y `quiet` idéntica; `pytest` 278 passed (sale el test del cliente
+    Streamlit de EMD); `pylint` 8.76; imports OK.
+  - **Limitación:** sin compilador de TypeScript en este entorno (las dependencias del SPA vienen
+    de un registro npm privado): los cambios del SPA se revisaron a mano y quedan para la puerta
+    en el Mac (`npm test`, `npm run build`).

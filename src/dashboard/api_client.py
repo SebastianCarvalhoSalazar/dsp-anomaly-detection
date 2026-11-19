@@ -84,15 +84,6 @@ class APIClient:
         resp.raise_for_status()
         return resp.json()
 
-    def get_offline_analysis(self, event_id: int) -> dict:
-        """Run EMD analysis on a stored event. Returns IMFs and spectrogram."""
-        resp = httpx.get(
-            f"{self._base_url}/events/{event_id}/offline_analysis",
-            timeout=30.0,
-        )
-        resp.raise_for_status()
-        return resp.json()
-
     def delete_event(self, event_id: int) -> None:
         """Delete a single event by ID (DB row + filesystem artifacts)."""
         resp = httpx.delete(f"{self._base_url}/events/{event_id}", timeout=10.0)

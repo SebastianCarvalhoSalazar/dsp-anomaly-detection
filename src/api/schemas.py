@@ -78,8 +78,6 @@ class FusionConfigMessage(BaseModel):
     gates: bool = False
 
 
-class OfflineAnalysisResponse(BaseModel):
-    imfs: list[list[float]]          # list of IMF arrays (time series)
-    n_imfs: int
+class SpectrogramResponse(BaseModel):
     sample_rate: int
     spectrogram: list[list[float]]   # mel-spectrogram as nested list (freq x time)
