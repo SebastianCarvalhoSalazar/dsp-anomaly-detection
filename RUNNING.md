@@ -166,7 +166,7 @@ Para verificar que todo el código funciona correctamente sin necesidad de hardw
 
 ```bash
 poetry run pytest -v
-# 198 tests, ~4 segundos
+# 279 tests, ~1.5 minutos
 ```
 
 ### Smoke test del pipeline DSP sin micrófono

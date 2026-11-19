@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Lint + tests (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      # sounddevice necesita PortAudio y opencv-python necesita libGL aunque
+      # los tests no usen micrófono ni cámara (se importan a nivel de módulo).
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libportaudio2 libgl1 libglib2.0-0
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: poetry
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      # Umbral por debajo del score actual (8.72): bloquea regresiones sin
+      # exigir limpiar todo el backlog de pylint de una vez.
+      - name: Lint
+        run: poetry run pylint src/ --fail-under=8.5
+
+      - name: Tests
+        run: poetry run pytest -q
