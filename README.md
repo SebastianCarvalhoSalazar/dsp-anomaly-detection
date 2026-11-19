@@ -1,5 +1,9 @@
 # Sistema Inteligente de Detección de Anomalías Audiovisuales
 
+[![CI](https://github.com/SebastianCarvalhoSalazar/dsp-anomaly-detection/actions/workflows/ci.yml/badge.svg)](https://github.com/SebastianCarvalhoSalazar/dsp-anomaly-detection/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.11%E2%80%933.14-3776AB?logo=python&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Sistema Python para detección de anomalías en señales de audio y video en tiempo real, sin necesidad de datos etiquetados. Combina procesamiento digital de señales clásico (DSP), modelos no supervisados y embeddings de modelos preentrenados de última generación para detectar, clasificar y almacenar eventos anómalos con soporte de búsqueda por similitud.
 
 ---
@@ -700,7 +704,7 @@ Para detener: `Ctrl+C`
 
 ```bash
 poetry run pytest -v
-# 240 tests, ~9s
+# 279 tests, ~1.5 min
 ```
 
 ### Ejecutar por módulo
