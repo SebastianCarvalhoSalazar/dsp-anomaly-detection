@@ -4,8 +4,8 @@
 be shared by the audio detector and the video detector (and any future
 modality) without copy-pasting the IsolationForest + PCA + drift logic:
 
-  - Sliding buffer + warmup
-  - Optional Welford online Z-score normalization
+  - Sliding buffer of RAW feature vectors + warmup
+  - Z-score scaler fitted on the training buffer and frozen with the model
   - PCA + IsolationForest fit/refit
   - Score calibration to [0, 1]
   - EMA smoothing + hysteresis
@@ -13,9 +13,18 @@ modality) without copy-pasting the IsolationForest + PCA + drift logic:
   - C2ST drift detection (optional)
   - save/load state and status/metrics snapshots
 
-Design notes (fixes from the v0.2.0 review):
-  - **C1**: when fitted, the normalizer is not updated with windows flagged
-    as raw anomalies (``freeze_normalizer_on_anomaly``).
+Design notes:
+  - **F1 (plan-correcciones)**: the buffer stores raw vectors and every fit
+    learns ``scaler → PCA → IsolationForest`` as one frozen chain, used
+    unchanged for scoring until the next fit. The former online Welford
+    normalizer let the first 30 warmup windows enter the buffer unscaled
+    (PCA collapsed onto them) and mixed vectors scaled with different stats.
+  - **F2 (plan-correcciones)**: the decision threshold is fixed at each fit
+    from the training-buffer scores (not a percentile of live scores, which
+    absorbed any anomaly longer than ~2 % of the window). Windows flagged as
+    anomalous are quarantined out of the training buffer; if the anomaly
+    persists for ``accept_after_windows`` they are accepted as the new normal
+    and a refit is forced.
   - **C2**: calibration widens the lower score bound by ``calibration_margin``
     so strong anomalies do not all saturate at 1.0.
   - **H1**: the heavy fit (PCA + IsolationForest + C2ST) runs *outside* the
@@ -47,55 +56,8 @@ from .types import AnomalyResult
 
 logger = logging.getLogger(__name__)
 
-
-class _WelfordNormalizer:
-    """Welford's online Z-score normalizer (per-feature).
-
-    Maintains running mean and variance with O(1) memory and O(d) per
-    update.  After a burn-in of ``min_samples`` calls, ``normalize``
-    returns z-scored vectors; before that it returns the raw vector.
-    """
-
-    def __init__(self, dim: int, min_samples: int = 30) -> None:
-        self._n = 0
-        self._mean = np.zeros(dim, dtype=np.float64)
-        self._m2 = np.zeros(dim, dtype=np.float64)
-        self._min_samples = min_samples
-
-    def update(self, x: np.ndarray) -> None:
-        self._n += 1
-        delta = x.astype(np.float64) - self._mean
-        self._mean += delta / self._n
-        delta2 = x.astype(np.float64) - self._mean
-        self._m2 += delta * delta2
-
-    def normalize(self, x: np.ndarray) -> np.ndarray:
-        if self._n < self._min_samples:
-            return x
-        var = self._m2 / self._n
-        std = np.sqrt(var + 1e-8)
-        return ((x.astype(np.float64) - self._mean) / std).astype(np.float32)
-
-    @property
-    def is_ready(self) -> bool:
-        return self._n >= self._min_samples
-
-    def mean_std(self) -> tuple[np.ndarray, np.ndarray]:
-        """Return (mean, std) of the running statistics."""
-        std = np.sqrt(self._m2 / self._n + 1e-8)
-        return self._mean.copy(), std
-
-    def get_state(self) -> dict:
-        return {
-            "n": self._n,
-            "mean": self._mean.copy(),
-            "m2": self._m2.copy(),
-        }
-
-    def load_state(self, state: dict) -> None:
-        self._n = state["n"]
-        self._mean = state["mean"]
-        self._m2 = state["m2"]
+# Minimum buffered windows before warmup explanations are meaningful.
+_MIN_EXPLAIN_SAMPLES = 30
 
 
 class BaseAnomalyDetector:
@@ -130,8 +92,17 @@ class BaseAnomalyDetector:
         self._score_min: float = -1.0
         self._score_max: float = 0.0
 
-        # Z-score normalizer — dim set on first score() call
-        self._normalizer: Optional[_WelfordNormalizer] = None
+        # Frozen z-score scaler + decision threshold (set at each fit, F1/F2)
+        self._mean: Optional[np.ndarray] = None
+        self._std: Optional[np.ndarray] = None
+        self._threshold: float = 0.0
+
+        # Quarantine of anomalous windows (kept out of the training buffer)
+        self._quarantine: deque[np.ndarray] = deque(
+            maxlen=max(1, self._config.accept_after_windows)
+        )
+        self._quarantine_hold: int = 0
+        self._force_refit: bool = False
 
         # EMA smoothing + hysteresis
         self._smoothed_score: float = 0.0
@@ -154,7 +125,6 @@ class BaseAnomalyDetector:
         self._prev_buffer: Optional[np.ndarray] = None
         self._drift_auc: float = 0.5
         self._top_drift_features: list[str] = []
-        self._adaptive_threshold: float = 0.0
         self._score_mean: float = 0.0
         # Why the last fit happened: "scheduled" | "drift" | "initial" (Req 7)
         self._refit_reason: str = "scheduled"
@@ -173,29 +143,19 @@ class BaseAnomalyDetector:
         fv = np.asarray(feature_vector, dtype=np.float32)
         ts = time.time()
 
-        # --- Phase A: under lock — normalize, buffer, decide fit -------- #
+        # --- Phase A: under lock — buffer (warmup) and decide fit ------- #
         with self._lock:
             dim = fv.shape[0]
 
             # M4: a feature_dim change invalidates the fitted model/PCA.
             if self._feature_dim is not None and dim != self._feature_dim:
                 self._reset_locked()
-
-            if self._normalizer is None:
-                self._normalizer = _WelfordNormalizer(dim)
             self._feature_dim = dim
 
-            normalizer_updated = False
-            if self._config.enable_zscore:
-                # During warmup we always update so stats can converge.
-                if not self._is_fitted:
-                    self._normalizer.update(fv)
-                    normalizer_updated = True
-                fv_norm = self._normalizer.normalize(fv)
-            else:
-                fv_norm = fv
-
-            self._buffer.append(fv_norm.copy())
+            # During warmup every window is training data (raw, F1).
+            appended = not self._is_fitted
+            if appended:
+                self._buffer.append(fv.copy())
             buf_len = len(self._buffer)
 
             need_fit = False
@@ -210,12 +170,8 @@ class BaseAnomalyDetector:
             ):
                 need_fit = True
                 is_initial = True
-                self._fitting = True
                 self._pending_refit_reason = "initial"
-                fit_X = np.array(list(self._buffer), dtype=np.float32)
-                fit_prev = self._prev_buffer
-            elif self._is_fitted:
-                self._samples_since_refit += 1
+            elif self._is_fitted and not self._fitting:
                 # Drift-aware: shorten the interval when drift is high (Req 7).
                 interval = self._config.refit_every
                 reason = "scheduled"
@@ -228,16 +184,19 @@ class BaseAnomalyDetector:
                         int(interval * self._config.drift_refit_factor),
                     )
                     reason = "drift"
-                if (
-                    self._samples_since_refit >= interval
-                    and not self._fitting
-                ):
+                if self._force_refit:
                     need_fit = True
-                    self._fitting = True
+                    reason = "accepted"
+                elif self._samples_since_refit >= interval:
+                    need_fit = True
+                if need_fit:
                     self._pending_refit_reason = reason
                     self._samples_since_refit = 0
-                    fit_X = np.array(list(self._buffer), dtype=np.float32)
-                    fit_prev = self._prev_buffer
+                    self._force_refit = False
+            if need_fit:
+                self._fitting = True
+                fit_X = np.array(list(self._buffer), dtype=np.float32)
+                fit_prev = self._prev_buffer
 
         # --- Phase B: heavy compute OUTSIDE the lock (H1) --------------- #
         if need_fit:
@@ -251,7 +210,7 @@ class BaseAnomalyDetector:
             # Persist a snapshot off the hot-path (Req 8).
             self._save_snapshot(fit_result, fit_X)
 
-        # --- Phase C: under lock — score with current model ------------- #
+        # --- Phase C: under lock — score with the frozen chain ---------- #
         with self._lock:
             if not self._is_fitted:
                 return AnomalyResult(
@@ -264,44 +223,19 @@ class BaseAnomalyDetector:
                     feature_vector=fv,
                 )
 
-            fv_score = fv_norm
-            if self._config.enable_pca and self._pca is not None:
-                fv_score = self._pca.transform(fv_norm.reshape(1, -1))[0].astype(
-                    np.float32
-                )
-
-            raw = float(self._model.score_samples([fv_score])[0])
+            raw = float(self._model.score_samples([self._transform(fv)])[0])
             anomaly_score = self._normalize_score(raw)
             self._recent_norm_scores.append(anomaly_score)
-
-            # --- Adaptive threshold -------------------------------------
             self._recent_scores.append(raw)
-            if (
-                self._config.enable_adaptive_threshold
-                and len(self._recent_scores) >= self._config.adaptive_score_window
-            ):
-                adaptive_thresh = float(
-                    np.percentile(
-                        list(self._recent_scores),
-                        self._config.adaptive_percentile,
-                    )
-                )
-                is_raw_anomaly = raw < adaptive_thresh
-                self._adaptive_threshold = adaptive_thresh
-            else:
-                is_raw_anomaly = raw < self._model.offset_
-                self._adaptive_threshold = float(self._model.offset_)
+            self._score_mean = float(np.mean(self._recent_scores))
 
-            if self._recent_scores:
-                self._score_mean = float(np.mean(list(self._recent_scores)))
+            # F2: fixed threshold from the training buffer (set at fit).
+            is_raw_anomaly = raw < self._threshold
 
-            # C1: fold benign windows into the normalizer; skip anomalies.
-            if self._config.enable_zscore and not normalizer_updated:
-                if (
-                    not self._config.freeze_normalizer_on_anomaly
-                    or not is_raw_anomaly
-                ):
-                    self._normalizer.update(fv)
+            # F2: keep anomalous windows out of the training buffer. (The
+            # window that completed the warmup is already buffered.)
+            if not appended:
+                self._route_to_buffer(fv, is_raw_anomaly)
 
             # --- EMA smoothing + hysteresis -----------------------------
             alpha = self._config.ema_alpha
@@ -328,6 +262,45 @@ class BaseAnomalyDetector:
             feature_vector=fv,
         )
 
+    def _transform(self, fv: np.ndarray) -> np.ndarray:
+        """Apply the frozen scaler (+ PCA). Caller must hold ``self._lock``."""
+        x = ((fv.astype(np.float64) - self._mean) / self._std).astype(np.float32)
+        if self._pca is not None:
+            x = self._pca.transform(x.reshape(1, -1))[0].astype(np.float32)
+        return x
+
+    def _route_to_buffer(self, fv: np.ndarray, is_raw_anomaly: bool) -> None:
+        """Append a post-fit window to the training buffer or quarantine it.
+
+        Caller must hold ``self._lock``. Anomalous windows (plus a short
+        ``hysteresis_count`` tail to bridge gaps) are quarantined so a long
+        anomaly cannot teach the model that it is normal. If the quarantine
+        streak reaches ``accept_after_windows`` the sound is accepted as the
+        new normal: the quarantined windows join the buffer and a refit is
+        forced. When the anomaly ends earlier, the quarantine is discarded.
+        """
+        cfg = self._config
+        if not cfg.quarantine_anomalies:
+            self._buffer.append(fv.copy())
+            self._samples_since_refit += 1
+            return
+        if is_raw_anomaly:
+            self._quarantine_hold = cfg.hysteresis_count
+        elif self._quarantine_hold > 0:
+            self._quarantine_hold -= 1
+        else:
+            self._quarantine.clear()
+            self._buffer.append(fv.copy())
+            self._samples_since_refit += 1
+            return
+        self._quarantine.append(fv.copy())
+        if len(self._quarantine) >= cfg.accept_after_windows:
+            self._buffer.extend(self._quarantine)
+            self._samples_since_refit += len(self._quarantine)
+            self._quarantine.clear()
+            self._quarantine_hold = 0
+            self._force_refit = True
+
     # ------------------------------------------------------------------ #
     #  Status / reset                                                     #
     # ------------------------------------------------------------------ #
@@ -351,24 +324,14 @@ class BaseAnomalyDetector:
     def get_drift_metrics(self) -> dict:
         """Return a thread-safe snapshot of drift detection metrics.
 
-        ``adaptive_threshold`` is the (100 - percentile)th percentile of
-        recent normalised scores, matching the dashboard chart scale.
+        ``adaptive_threshold`` is the decision threshold mapped to the same
+        [0, 1] scale as ``anomaly_score`` (F2: one threshold, one scale).
         """
         with self._lock:
-            if (
-                self._is_fitted
-                and len(self._recent_norm_scores)
-                >= self._config.adaptive_score_window
-            ):
-                norm_thresh = float(
-                    np.percentile(
-                        list(self._recent_norm_scores),
-                        100.0 - self._config.adaptive_percentile,
-                    )
-                )
-            else:
-                norm_thresh = 0.5  # sensible default
-
+            norm_thresh = (
+                self._normalize_score(self._threshold)
+                if self._is_fitted else 0.5
+            )
             return {
                 "adaptive_threshold": round(norm_thresh, 6),
                 "score_mean": round(self._score_mean, 6),
@@ -388,6 +351,12 @@ class BaseAnomalyDetector:
         self._buffer.clear()
         self._model = None
         self._pca = None
+        self._mean = None
+        self._std = None
+        self._threshold = 0.0
+        self._quarantine.clear()
+        self._quarantine_hold = 0
+        self._force_refit = False
         self._is_fitted = False
         self._fitting = False
         self._samples_since_refit = 0
@@ -396,12 +365,10 @@ class BaseAnomalyDetector:
         self._consecutive_anomalies = 0
         self._recent_scores.clear()
         self._recent_norm_scores.clear()
-        self._normalizer = None
         self._refit_count = 0
         self._prev_buffer = None
         self._drift_auc = 0.5
         self._top_drift_features = []
-        self._adaptive_threshold = 0.0
         self._score_mean = 0.0
         self._refit_reason = "scheduled"
         self._pending_refit_reason = "scheduled"
@@ -410,13 +377,22 @@ class BaseAnomalyDetector:
     #  Persistent baseline                                                #
     # ------------------------------------------------------------------ #
 
+    # Bumped when the persisted layout changes incompatibly. v2: raw buffer
+    # + frozen scaler/threshold (F1/F2); v1 states held a z-scored buffer
+    # and a Welford normalizer and are discarded on load.
+    _STATE_VERSION = 2
+
     def save_state(self, path: Optional[str] = None) -> None:
         """Serialize detector state to disk for warmup-free restart (M3)."""
         path = path or self._config.state_path
         with self._lock:
             state = {
+                "version": self._STATE_VERSION,
                 "model": self._model,
                 "pca": self._pca,
+                "mean": self._mean,
+                "std": self._std,
+                "threshold": self._threshold,
                 "is_fitted": self._is_fitted,
                 "buffer": list(self._buffer),
                 "feature_dim": self._feature_dim,
@@ -425,9 +401,6 @@ class BaseAnomalyDetector:
                 "smoothed_score": self._smoothed_score,
                 "consecutive_anomalies": self._consecutive_anomalies,
                 "samples_since_refit": self._samples_since_refit,
-                "normalizer": (
-                    self._normalizer.get_state() if self._normalizer else None
-                ),
                 "recent_scores": list(self._recent_scores),
                 "recent_norm_scores": list(self._recent_norm_scores),
                 "refit_count": self._refit_count,
@@ -435,7 +408,6 @@ class BaseAnomalyDetector:
                 "drift_auc": self._drift_auc,
                 "top_drift_features": list(self._top_drift_features),
                 "score_mean": self._score_mean,
-                "adaptive_threshold": self._adaptive_threshold,
                 "refit_reason": self._refit_reason,
             }
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -443,15 +415,30 @@ class BaseAnomalyDetector:
             pickle.dump(state, f)
 
     def load_state(self, path: Optional[str] = None) -> bool:
-        """Load a previously saved state. Returns True on success."""
+        """Load a previously saved state. Returns True on success.
+
+        States written by an incompatible version are ignored (the detector
+        warms up again) rather than mixing scaled and raw buffers.
+        """
         path = path or self._config.state_path
         if not os.path.exists(path):
             return False
         try:
             with open(path, "rb") as f:
                 state = pickle.load(f)
+            if state.get("version") != self._STATE_VERSION:
+                logger.warning(
+                    "Ignoring detector state %s: incompatible version %s "
+                    "(expected %s); warming up from scratch.",
+                    path, state.get("version"), self._STATE_VERSION,
+                )
+                return False
             with self._lock:
                 self._model = state["model"]
+                self._pca = state.get("pca")
+                self._mean = state["mean"]
+                self._std = state["std"]
+                self._threshold = state["threshold"]
                 self._is_fitted = state["is_fitted"]
                 self._buffer = deque(
                     state["buffer"], maxlen=self._config.buffer_size
@@ -464,7 +451,6 @@ class BaseAnomalyDetector:
                     "consecutive_anomalies", 0
                 )
                 self._samples_since_refit = state.get("samples_since_refit", 0)
-                self._pca = state.get("pca")
                 self._refit_count = state.get("refit_count", 0)
                 self._prev_buffer = state.get("prev_buffer")
                 self._drift_auc = state.get("drift_auc", 0.5)
@@ -472,16 +458,7 @@ class BaseAnomalyDetector:
                     state.get("top_drift_features", [])
                 )
                 self._score_mean = state.get("score_mean", 0.0)
-                self._adaptive_threshold = state.get("adaptive_threshold", 0.0)
                 self._refit_reason = state.get("refit_reason", "scheduled")
-                norm_state = state.get("normalizer")
-                if norm_state is not None:
-                    dim = len(norm_state["mean"])
-                    # M4: keep feature_dim consistent with the normalizer.
-                    if self._feature_dim is None:
-                        self._feature_dim = dim
-                    self._normalizer = _WelfordNormalizer(dim)
-                    self._normalizer.load_state(norm_state)
                 for s in state.get("recent_scores", []):
                     self._recent_scores.append(s)
                 for s in state.get("recent_norm_scores", []):
@@ -582,13 +559,17 @@ class BaseAnomalyDetector:
         if self._config.enable_drift_detection and prev_buffer is not None:
             drift_auc, top_feats = self._run_c2st(prev_buffer, X)
 
+        # F1: the scaler is learned from this buffer and frozen with the model.
+        mean, std = self._fit_scaler(X)
+        Xz = ((X.astype(np.float64) - mean) / std).astype(np.float32)
+
         if self._config.enable_pca:
-            n_comp = min(self._config.pca_components, X.shape[1])
+            n_comp = min(self._config.pca_components, Xz.shape[1], Xz.shape[0])
             pca = PCA(n_components=n_comp)
-            X_reduced = pca.fit_transform(X)
+            X_reduced = pca.fit_transform(Xz)
         else:
             pca = None
-            X_reduced = X
+            X_reduced = Xz
 
         model = IsolationForest(
             n_estimators=self._config.n_estimators,
@@ -602,9 +583,21 @@ class BaseAnomalyDetector:
         # C2: widen the lower bound so worse-than-training anomalies do not
         # all clip to exactly 1.0.
         margin = self._config.calibration_margin * (hi - lo)
+        # F2: the decision threshold is fixed per fit. With the adaptive
+        # option it is the given percentile of the *training* scores (the
+        # reference "normal"), otherwise the IsolationForest offset_.
+        if self._config.enable_adaptive_threshold:
+            threshold = float(
+                np.percentile(scores, self._config.adaptive_percentile)
+            )
+        else:
+            threshold = float(model.offset_)
         return {
             "model": model,
             "pca": pca,
+            "mean": mean,
+            "std": std,
+            "threshold": threshold,
             "score_min": lo - margin,
             "score_max": hi,
             "drift_auc": drift_auc,
@@ -612,10 +605,25 @@ class BaseAnomalyDetector:
             "prev_buffer": X,
         }
 
+    def _fit_scaler(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Per-feature mean/std of the training buffer (identity if z-score
+        is disabled). Constant features get std=1 to avoid division by 0."""
+        d = X.shape[1]
+        if not self._config.enable_zscore:
+            return np.zeros(d), np.ones(d)
+        Xd = X.astype(np.float64)
+        mean = Xd.mean(axis=0)
+        std = Xd.std(axis=0)
+        std = np.where(std < 1e-8, 1.0, std)
+        return mean, std
+
     def _apply_fit(self, fit: dict) -> None:
         """Swap in a freshly computed model. Caller must hold ``self._lock``."""
         self._model = fit["model"]
         self._pca = fit["pca"]
+        self._mean = fit["mean"]
+        self._std = fit["std"]
+        self._threshold = fit["threshold"]
         self._score_min = fit["score_min"]
         self._score_max = fit["score_max"]
         self._drift_auc = fit["drift_auc"]
@@ -653,10 +661,15 @@ class BaseAnomalyDetector:
         """
         fv = np.asarray(feature_vector, dtype=np.float64)
         with self._lock:
-            norm = self._normalizer
-            if norm is None or not norm.is_ready:
+            if self._is_fitted and self._mean is not None:
+                mean, std = self._mean, self._std
+            elif len(self._buffer) >= _MIN_EXPLAIN_SAMPLES:
+                # Warmup: explain against the buffer collected so far.
+                mean, std = self._fit_scaler(
+                    np.array(list(self._buffer), dtype=np.float32)
+                )
+            else:
                 return []
-            mean, std = norm.mean_std()
             names = self._resolve_feature_names(fv.shape[0])
         if fv.shape[0] != mean.shape[0]:
             return []

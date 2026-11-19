@@ -34,13 +34,22 @@ class PercentileCalibrator:
             self._hist.append(float(score))
 
     def calibrate(self, score: float) -> float:
-        """Return the percentile rank of ``score`` within recent history."""
+        """Return the percentile rank of ``score`` within recent history.
+
+        Uses the **mid-rank** for ties (F3): a value equal to the whole history
+        maps to 0.5, not 1.0. With ``bisect_right`` alone a constant stream
+        (e.g. warmup zeros, a static scene) calibrated to 1.0 = "more anomalous
+        than everything", which made the fusion fire on silence.
+        """
         with self._lock:
             n = len(self._hist)
             if n < self._min_samples:
                 return float(min(max(score, 0.0), 1.0))
             ordered = sorted(self._hist)
-        rank = bisect.bisect_right(ordered, float(score)) / n
+        x = float(score)
+        below = bisect.bisect_left(ordered, x)
+        at_or_below = bisect.bisect_right(ordered, x)
+        rank = (below + at_or_below) / (2.0 * n)
         return float(min(max(rank, 0.0), 1.0))
 
     def calibrate_and_update(self, score: float) -> float:

@@ -40,3 +40,11 @@ def test_dynamic_update_shifts_distribution():
         cal.update(0.9)  # window rolls over to high values
     high_after = cal.calibrate(0.5)  # now 0.5 is low relative to 0.9
     assert high_before > high_after
+
+
+def test_ties_map_to_mid_rank_not_one():
+    """F3: a constant history (warmup zeros, static scene) must not calibrate
+    to 1.0 — that made the fusion report an anomaly on silence."""
+    cal = PercentileCalibrator(window=500, min_samples=50)
+    out = [cal.calibrate_and_update(0.0) for _ in range(60)]
+    assert out[-1] == 0.5

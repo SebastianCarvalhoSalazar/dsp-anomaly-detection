@@ -8,35 +8,44 @@ class DetectorConfig:
     """Configuration for the anomaly detector."""
 
     n_estimators: int = 200
-    # 'auto' sets contamination to 0.1 (appropriate for unknown anomaly rate)
+    # 'auto' → offset_ = -0.5 as in the original IsolationForest paper (only
+    # used as decision threshold when enable_adaptive_threshold=False)
     contamination: float | str = "auto"
     max_samples: int | str = "auto"
     random_state: int = 42
-    # Minimum samples collected before first fit; ~64s of audio at 16kHz/4096/1024
+    # Minimum samples collected before first fit. Live windows do not overlap
+    # (4096 samples @ 16 kHz = 0.256 s), so 500 windows ≈ 128 s of audio.
     buffer_size: int = 500
     # Refit the model after this many new samples post-initial-fit (sliding window)
     refit_every: int = 200
     feature_dim: int = 0  # set dynamically from AudioProcessor.feature_dim
 
-    # -- Z-score normalization (2.3) -------------------------------------------
+    # -- Z-score scaling ---------------------------------------------------------
+    # Per-feature scaling fitted on the training buffer and frozen with the
+    # model (F1). Needed because PCA is scale-sensitive; IsolationForest alone
+    # is invariant to per-feature affine rescaling.
     enable_zscore: bool = True
-    # Fix C1: once the model is fitted, do NOT fold windows that are
-    # currently flagged as raw anomalies into the running mean/variance.
-    # This prevents the normalizer from desensitising itself during the
-    # exact events it must detect (train/serve skew). Benign drift is
-    # still tracked. Set False to restore the legacy always-update path.
-    freeze_normalizer_on_anomaly: bool = True
+
+    # -- Quarantine of anomalous windows (F2) ------------------------------------
+    # Windows flagged as anomalous do not enter the training buffer, so a long
+    # anomaly cannot become "normal" at the next refit.
+    quarantine_anomalies: bool = True
+    # ...unless it persists this long (≈60 s at 0.256 s/window): then it is
+    # accepted as the new normal and a refit is forced.
+    accept_after_windows: int = 234
 
     # -- Score smoothing / hysteresis (2.4) ------------------------------------
     ema_alpha: float = 0.3  # weight for current raw score in EMA
     # Number of consecutive anomalous windows to confirm an anomaly
     hysteresis_count: int = 3
 
-    # -- Adaptive threshold (3.5) ----------------------------------------------
+    # -- Decision threshold (F2) -------------------------------------------------
+    # True: threshold = ``adaptive_percentile`` of the TRAINING-buffer scores,
+    # fixed at each fit. False: IsolationForest offset_.
     enable_adaptive_threshold: bool = True
-    # Recent-scores window for percentile computation
+    # Rolling window of recent scores kept for the dashboard (score_mean)
     adaptive_score_window: int = 500
-    # Percentile below which raw scores are considered anomalous (bottom 2%)
+    # Percentile of training scores below which a window is anomalous
     adaptive_percentile: float = 2.0
 
     # -- Persistent baseline (3.4) ---------------------------------------------

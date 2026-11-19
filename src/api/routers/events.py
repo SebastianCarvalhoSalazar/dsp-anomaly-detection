@@ -34,6 +34,8 @@ def _event_to_response(event: AnomalyEvent) -> EventResponse:
         video_score=event.video_score,
         combined_score=event.combined_score,
         dominant_modality=event.dominant_modality,
+        end_timestamp=event.end_timestamp,
+        duration_s=event.duration_s,
     )
 
 

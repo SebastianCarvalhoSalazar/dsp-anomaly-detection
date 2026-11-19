@@ -471,6 +471,9 @@ def test_feature_drift_after_shift():
         hysteresis_count=1,
         enable_drift_detection=True,
         enable_adaptive_threshold=False,
+        # Isolate the drift mechanics: the shifted data must reach the
+        # training buffer (with quarantine it would be held out as anomalous).
+        quarantine_anomalies=False,
     )
     det = AnomalyDetector(cfg)
 

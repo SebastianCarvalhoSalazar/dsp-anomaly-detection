@@ -26,6 +26,7 @@ fusión tardía** (audio + video) descrita en el plan
 | [0011](0011-backward-compatible-event-schema-migration.md) | Migración de esquema de eventos compatible hacia atrás | Aceptado | 1 |
 | [0012](0012-dashboard-pipeline-live-control-channel.md) | Canal de control dashboard → pipeline en vivo | Aceptado | post-v0.3 |
 | [0013](0013-reemplazo-dashboard-streamlit-por-spa.md) | Reemplazo del dashboard Streamlit por un SPA (React + TS) | Aceptado | Frontend |
+| [0014](0014-nucleo-de-deteccion-funcional.md) | Núcleo de detección funcional: umbral estable, eventos segmentados, componentes opcionales | Aceptado | Plan de correcciones |
 
 ## Convenciones
 

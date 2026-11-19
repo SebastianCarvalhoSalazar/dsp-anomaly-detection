@@ -23,6 +23,9 @@ _ADDED_COLUMNS: dict[str, str] = {
     "top_audio_features": "TEXT",
     "top_video_features": "TEXT",
     "dominant_modality": "VARCHAR(32)",
+    # Event segmentation (plan-correcciones F5)
+    "end_timestamp": "DATETIME",
+    "duration_s": "FLOAT",
 }
 
 

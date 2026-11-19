@@ -16,6 +16,9 @@ def _cfg(**kw):
     base = dict(
         buffer_size=40, refit_every=40, n_estimators=15,
         hysteresis_count=1, enable_adaptive_threshold=False,
+        # These tests exercise drift/refit mechanics in isolation: shifted data
+        # must reach the training buffer instead of being quarantined (F2).
+        quarantine_anomalies=False,
     )
     base.update(kw)
     return DetectorConfig(**base)
@@ -53,15 +56,19 @@ def test_drift_aware_refits_more_often_than_fixed():
     fixed = AnomalyDetector(_cfg(enable_drift_aware_refit=False, **common))
 
     data = _ramp(200, seed=1)
+    reasons = set()
     for fv in data:
         drift_aware.score(fv)
+        reasons.add(drift_aware.get_drift_metrics()["refit_reason"])
     for fv in data:
         fixed.score(fv)
 
     aware_refits = drift_aware.get_drift_metrics()["refit_count"]
     fixed_refits = fixed.get_drift_metrics()["refit_count"]
     assert aware_refits > fixed_refits
-    assert drift_aware.get_drift_metrics()["refit_reason"] == "drift"
+    # Not necessarily the *last* refit: once refits get closer, consecutive
+    # buffers overlap and the C2ST AUC drops (known bias, plan-correcciones).
+    assert "drift" in reasons
 
 
 # --------------------------------------------------------------------------- #

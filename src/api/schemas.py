@@ -20,6 +20,9 @@ class EventResponse(BaseModel):
     video_score: Optional[float] = None
     combined_score: Optional[float] = None
     dominant_modality: Optional[str] = None
+    # Event segmentation (plan-correcciones F5) — None for older events
+    end_timestamp: Optional[datetime] = None
+    duration_s: Optional[float] = None
 
     model_config = {"from_attributes": True}
 
