@@ -278,42 +278,6 @@ def test_merge_chain_blocked_by_max_area():
 
 
 # ---------------------------------------------------------------------------
-# MotionDetector — draw_boxes
-# ---------------------------------------------------------------------------
-
-def test_draw_boxes_returns_copy():
-    det = MotionDetector()
-    frame = _black_frame()
-    boxes = [BoundingBox(x=10, y=10, w=50, h=50, area=2500)]
-    annotated = det.draw_boxes(frame, boxes)
-    assert annotated is not frame
-
-
-def test_draw_boxes_same_shape():
-    det = MotionDetector()
-    frame = _black_frame()
-    boxes = [BoundingBox(x=10, y=10, w=50, h=50, area=2500)]
-    annotated = det.draw_boxes(frame, boxes)
-    assert annotated.shape == frame.shape
-
-
-def test_draw_boxes_modifies_pixels():
-    det = MotionDetector()
-    frame = _black_frame()
-    boxes = [BoundingBox(x=10, y=10, w=100, h=100, area=10000)]
-    annotated = det.draw_boxes(frame, boxes)
-    # The green rectangle line must alter at least one pixel
-    assert not np.array_equal(annotated, frame)
-
-
-def test_draw_boxes_no_boxes_unchanged():
-    det = MotionDetector()
-    frame = _black_frame()
-    annotated = det.draw_boxes(frame, [])
-    np.testing.assert_array_equal(annotated, frame)
-
-
-# ---------------------------------------------------------------------------
 # MotionDetector — reset
 # ---------------------------------------------------------------------------
 
@@ -331,22 +295,6 @@ def test_reset_reinitializes_background():
     # Verify detector remains usable
     boxes = det.detect(_black_frame())
     assert isinstance(boxes, list)
-
-
-# ---------------------------------------------------------------------------
-# MotionDetector — detect_with_result
-# ---------------------------------------------------------------------------
-
-def test_detect_with_result_returns_motion_result():
-    from src.vision.types import MotionResult
-    config = VisionConfig(min_contour_area=100)
-    det = MotionDetector(config)
-    _warmup(det)
-    result = det.detect_with_result(_frame_with_patch())
-    assert isinstance(result, MotionResult)
-    assert result.annotated_frame.shape == result.frame.shape
-    assert isinstance(result.has_motion, bool)
-    assert result.timestamp > 0
 
 
 # ---------------------------------------------------------------------------

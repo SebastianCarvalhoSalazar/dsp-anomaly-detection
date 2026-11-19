@@ -1,3 +1,3 @@
-from .buffer import AudioWindow, CapturedFrame, FrameRingBuffer
+from .buffer import CapturedFrame, FrameRingBuffer
 
-__all__ = ["AudioWindow", "CapturedFrame", "FrameRingBuffer"]
+__all__ = ["CapturedFrame", "FrameRingBuffer"]

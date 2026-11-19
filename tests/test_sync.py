@@ -2,20 +2,11 @@
 
 import numpy as np
 
-from src.sync import AudioWindow, CapturedFrame, FrameRingBuffer
+from src.sync import CapturedFrame, FrameRingBuffer
 
 
 def _frame(val: int) -> np.ndarray:
     return np.full((4, 4, 3), val, dtype=np.uint8)
-
-
-# --------------------------------------------------------------------------- #
-# AudioWindow
-# --------------------------------------------------------------------------- #
-
-def test_audio_window_timestamp_is_midpoint():
-    w = AudioWindow(start_timestamp=10.0, end_timestamp=12.0)
-    assert w.timestamp == 11.0
 
 
 # --------------------------------------------------------------------------- #

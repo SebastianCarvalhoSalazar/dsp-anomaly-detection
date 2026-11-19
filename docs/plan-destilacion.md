@@ -13,7 +13,7 @@
 | 2 — Retirar fusión, detector de video y modelos lentos | ✅ Hecho (SPA sin compilar aquí) | ver bitácora |
 | 3 — "Fuente probable" → "movimiento principal" | ✅ Hecho (SPA sin compilar aquí) | ver bitácora |
 | 4 — Retirar Streamlit (adelantado, antes del 2) | ✅ Hecho | ver bitácora |
-| 5 — Dependencias y código muerto | ⏳ | |
+| 5 — Dependencias y código muerto | ✅ Hecho | ver bitácora |
 | 6 — Documentación | ⏳ | |
 | Validación en el Mac del usuario (SPA + prueba real) | ⏳ pendiente | |
 
@@ -116,3 +116,16 @@ Determinismo comprobado: dos corridas seguidas de `events` dan hashes e informe 
     todas las cajas empataban y ganaba la más grande; ahora gana la de mayor área × novedad.
   - **Puerta:** huella idéntica; `pytest` 230 passed (+2: el recuadro correcto se dibuja con
     la clave nueva y con la vieja, comprobado por color de píxel); `pylint` sin avisos nuevos.
+- **2026-11-19 · Paso 5** — `pyproject.toml` pierde 13 dependencias directas (`emd-signal`,
+  `streamlit`, `plotly`, `qdrant-client`, `asyncpg`, `psycopg2-binary`, `seaborn`, `matplotlib`,
+  `torchmetrics`, `einops`, `timm`, `accelerate`, `av`). `poetry lock` sin `--regenerate`:
+  **166 → 113 paquetes, ninguna versión cambiada, ninguno añadido**. Entorno sincronizado
+  (`poetry sync`) para que la puerta corra sin ellos. Código muerto retirado: `AudioWindow`,
+  `MotionDetector.detect_with_result` + `MotionResult` + `draw_boxes` (solo los usaban sus tests).
+  - Se mantiene `AudioProcessor.process_window_with_meta`: solo lo usa `tests/test_dsp.py`, que
+    está en la lista de tests del núcleo que no se modifican.
+  - Se mantienen `torchvision` y `torchaudio`: los procesadores de imagen de transformers pueden
+    requerir `torchvision`, y cargar los modelos reales no es verificable aquí (Hugging Face
+    bloqueado).
+  - **Puerta:** huella idéntica; `pytest` 224 passed (salen 6 tests del código muerto); `pylint`
+    125 → 123 avisos, ninguno nuevo; imports de transformers/librosa/torchaudio OK.
