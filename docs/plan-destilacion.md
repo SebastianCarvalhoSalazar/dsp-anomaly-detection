@@ -173,3 +173,9 @@ Diff total respecto a `main` en `src`, `tests`, `web/src` y `scripts`: 253 inser
   - **Verificación:** todos los enlaces relativos de la documentación apuntan a archivos
     existentes (salvo el marcador de la plantilla de ADR); los términos retirados solo aparecen
     en documentos marcados como históricos o en notas de compatibilidad.
+- **2026-11-19 · Merge de `main`** — Entraron en `main` los PR #9 (licencia MIT, CI de
+  GitHub Actions, recuentos de tests) y #10 (servidor PulseAudio ficticio en el CI).
+  Conflictos solo en `README.md` y `RUNNING.md`: se conservan las insignias de `main` sobre la
+  descripción nueva y el recuento de tests de esta rama (224). Comprobado como en el CI:
+  `pylint src/ --fail-under=8.5` pasa (8.63) y `pytest` 224 passed; huella idéntica. Se
+  actualiza el comentario del workflow que citaba la nota anterior (8.72).

@@ -460,7 +460,9 @@ dsp-anomaly-detection/
 │   ├── architecture/          # Visión general de la arquitectura vigente
 │   ├── plan-correcciones.md   # Núcleo corregido (ADR-0014): plan, bitácora, resultados
 │   └── plan-destilacion.md    # Módulos retirados (ADR-0015): plan, bitácora, resultados
+├── .github/workflows/ci.yml  # CI: pylint (--fail-under=8.5) + pytest en cada PR
 ├── pyproject.toml · poetry.lock
+├── LICENSE                    # MIT
 └── .env.example
 ```
 

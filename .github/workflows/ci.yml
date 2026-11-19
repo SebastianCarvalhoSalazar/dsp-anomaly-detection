@@ -45,7 +45,8 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction
 
-      # Umbral por debajo del score actual (8.72): bloquea regresiones sin
+      # Umbral por debajo del score actual (8.63 tras ADR-0015; la nota bajó por
+      # borrar código limpio, sin avisos nuevos): bloquea regresiones sin
       # exigir limpiar todo el backlog de pylint de una vez.
       - name: Lint
         run: poetry run pylint src/ --fail-under=8.5
