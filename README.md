@@ -1,5 +1,9 @@
 # Sistema de Detección de Anomalías Acústicas en Tiempo Real
 
+[![CI](https://github.com/SebastianCarvalhoSalazar/dsp-anomaly-detection/actions/workflows/ci.yml/badge.svg)](https://github.com/SebastianCarvalhoSalazar/dsp-anomaly-detection/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.11%E2%80%933.14-3776AB?logo=python&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Sistema Python que escucha un lugar de forma continua, aprende cómo suena normalmente y
 registra como **evento** todo sonido fuera de lo habitual, sin datos etiquetados. Combina
 procesamiento digital de señales (wavelets, Transformada de Scattering), un detector no
