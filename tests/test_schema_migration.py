@@ -60,8 +60,36 @@ def test_migration_adds_columns_and_preserves_old_rows(tmp_path):
     events = db.list_events(limit=10)
     assert len(events) == 1
     assert events[0].event_dir == "eventos/old-1"
-    assert events[0].audio_score is None
-    assert events[0].dominant_modality is None
+    assert events[0].top_audio_features is None
+    assert events[0].duration_s is None
+
+
+def test_v03_database_with_retired_columns_still_works(tmp_path):
+    """ADR-0015: a v0.3 database keeps its fusion/video columns. They are no
+    longer mapped by the ORM; reads and new inserts must keep working."""
+    from src.storage.models import AnomalyEvent
+
+    db_path = str(tmp_path / "events.db")
+    _make_old_db(db_path)
+    engine = sa.create_engine(f"sqlite:///{db_path}")
+    with engine.begin() as conn:
+        for col, typ in [("audio_score", "FLOAT"), ("video_score", "FLOAT"),
+                         ("combined_score", "FLOAT"), ("slow_audio_score", "FLOAT"),
+                         ("top_video_features", "TEXT"),
+                         ("dominant_modality", "VARCHAR(32)")]:
+            conn.execute(sa.text(f"ALTER TABLE anomaly_events ADD COLUMN {col} {typ}"))
+        conn.execute(sa.text("UPDATE anomaly_events SET audio_score=0.7, "
+                             "dominant_modality='audio-driven'"))
+    engine.dispose()
+
+    db = Database(StorageConfig(db_path=db_path))
+    db.init()
+    assert [e.event_dir for e in db.list_events(limit=10)] == ["eventos/old-1"]
+    new_id = db.save_event(AnomalyEvent(
+        timestamp=datetime.now(timezone.utc), anomaly_score=0.5,
+        event_dir="eventos/new-1",
+    ))
+    assert db.get_event(new_id).event_dir == "eventos/new-1"
 
 
 def test_migration_is_idempotent(tmp_path):

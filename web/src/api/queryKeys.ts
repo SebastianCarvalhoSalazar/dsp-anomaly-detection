@@ -5,5 +5,4 @@ export const queryKeys = {
   event: (id: number) => ['event', id] as const,
   spectrogram: (id: number) => ['spectrogram', id] as const,
   similarByEvent: (id: number, k: number) => ['similarByEvent', id, k] as const,
-  fusionConfig: () => ['fusionConfig'] as const,
 };

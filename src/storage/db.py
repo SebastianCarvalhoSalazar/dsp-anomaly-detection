@@ -13,16 +13,7 @@ from .models import AnomalyEvent, Base
 # Columns added after v0.2.0. ``create_all`` handles fresh databases; this
 # map drives an idempotent ALTER for databases created by older versions.
 _ADDED_COLUMNS: dict[str, str] = {
-    "audio_score": "FLOAT",
-    "video_score": "FLOAT",
-    "combined_score": "FLOAT",
-    "fast_audio_score": "FLOAT",
-    "slow_audio_score": "FLOAT",
-    "fast_video_score": "FLOAT",
-    "slow_video_score": "FLOAT",
     "top_audio_features": "TEXT",
-    "top_video_features": "TEXT",
-    "dominant_modality": "VARCHAR(32)",
     # Event segmentation (plan-correcciones F5)
     "end_timestamp": "DATETIME",
     "duration_s": "FLOAT",

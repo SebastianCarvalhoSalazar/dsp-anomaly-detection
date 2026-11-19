@@ -101,54 +101,6 @@ def test_check_reset_handles_non_200_status(pipeline):
 
 
 # ---------------------------------------------------------------------------
-# Live fusion config (dashboard-driven)
-# ---------------------------------------------------------------------------
-
-def test_apply_fusion_config_rebuilds_strategy_and_gates(pipeline):
-    from src.fusion import Maximum
-    pipeline._apply_fusion_config(
-        {"strategy": "max", "audio_weight": 0.2, "gates": True}
-    )
-    assert isinstance(pipeline.fusion_strategy, Maximum)
-    assert pipeline._fusion_gates is True
-
-
-def test_apply_fusion_config_weighted_uses_weight(pipeline):
-    from src.fusion import WeightedAverage
-    pipeline._apply_fusion_config(
-        {"strategy": "weighted", "audio_weight": 0.8, "gates": False}
-    )
-    assert isinstance(pipeline.fusion_strategy, WeightedAverage)
-    assert pipeline.fusion_strategy.audio_weight == 0.8
-    assert pipeline._fusion_gates is False
-
-
-def test_apply_fusion_config_ignores_unknown_strategy(pipeline):
-    before = pipeline.fusion_strategy
-    pipeline._apply_fusion_config({"strategy": "bogus", "audio_weight": 0.5})
-    assert pipeline.fusion_strategy is before  # unchanged
-
-
-def test_check_fusion_config_applies_remote_config(pipeline):
-    from src.fusion import OrStrategy
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {
-        "strategy": "or", "audio_weight": 0.5, "gates": True,
-    }
-    with patch("src.pipeline.httpx.get", return_value=mock_resp):
-        pipeline._check_fusion_config()
-    assert isinstance(pipeline.fusion_strategy, OrStrategy)
-    assert pipeline._fusion_gates is True
-
-
-def test_check_fusion_config_silent_when_api_unavailable(pipeline):
-    import httpx as _httpx
-    with patch("src.pipeline.httpx.get", side_effect=_httpx.ConnectError("x")):
-        pipeline._check_fusion_config()  # must not raise
-
-
-# ---------------------------------------------------------------------------
 # process_window — regressions (plan-correcciones)
 # ---------------------------------------------------------------------------
 
@@ -179,17 +131,17 @@ def offline_pipeline(tmp_path, monkeypatch):
     return p
 
 
-def test_f3_no_fused_events_during_warmup(offline_pipeline):
-    """F3: with the fused decision gating events, the warmup must not fire.
+def test_no_events_during_warmup(offline_pipeline):
+    """No window can produce an event while the detector is warming up.
 
-    Before the fix both calibrators filled with warmup zeros, ties mapped to
-    rank 1.0 and combined_score=1.0 fired an event on every window."""
+    (Formerly F3, which covered the fused decision; fusion was removed in
+    ADR-0015 and the event decision is the audio detector alone.)"""
     p = offline_pipeline
-    p._fusion_gates = True
     p._handle_anomaly = MagicMock()
     for k, w in enumerate(_noise_windows(120)):
         out = p.process_window(w, 1000.0 + k * 0.256)
-        assert out["mm"]["combined_score"] == 0.0
+        assert out["gate"] is False
+    p.flush_events()
     assert not p.detector.get_status()["is_fitted"]
     p._handle_anomaly.assert_not_called()
 
@@ -292,21 +244,25 @@ def test_f5_sustained_tone_is_one_event_and_loop_never_blocks(offline_pipeline):
 
 
 def test_f6_non_deciding_components_are_off_by_default(offline_pipeline):
-    """Fase 6 / ADR-0014: drift, snapshots and the video detector are opt-in."""
-    import numpy as np
+    """ADR-0014: drift and snapshots are opt-in."""
     p = offline_pipeline
     assert p.detector._config.enable_drift_detection is False
     assert p.detector._config.enable_drift_aware_refit is False
     assert p.detector._snapshot_store is None
-    p.video_detector.score = MagicMock()
+
+
+def test_window_summary_has_only_live_fields(offline_pipeline):
+    """ADR-0015: no fusion/video/slow fields leak into the per-window output."""
+    import numpy as np
+    p = offline_pipeline
     p._frame_buffer.push(np.zeros((8, 8, 3), np.uint8), 7000.0)
     out = p.process_window(np.zeros(4096, np.float32), 7000.0)
-    p.video_detector.score.assert_not_called()
-    assert out["mm"]["video_score"] == 0.0
+    assert set(out["mm"]) == {"top_audio_features"}
+    assert not hasattr(p, "video_detector") and not hasattr(p, "fusion_strategy")
 
 
 def test_f6_flags_reenable_components(tmp_path, monkeypatch):
-    for k in ("ENABLE_DRIFT", "ENABLE_SNAPSHOTS", "ENABLE_VIDEO_DETECTOR"):
+    for k in ("ENABLE_DRIFT", "ENABLE_SNAPSHOTS"):
         monkeypatch.setenv(k, "true")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("SNAPSHOTS_DIR", str(tmp_path / "snapshots"))
@@ -316,4 +272,3 @@ def test_f6_flags_reenable_components(tmp_path, monkeypatch):
     p = Pipeline()
     assert p.detector._config.enable_drift_detection is True
     assert p.detector._snapshot_store is not None
-    assert p._enable_video is True

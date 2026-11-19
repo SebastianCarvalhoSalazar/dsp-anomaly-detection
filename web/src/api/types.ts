@@ -1,6 +1,5 @@
 // Tipos espejo de src/api/schemas.py. Ver docs/frontend-migration/03-contrato-api-frontend.md.
 
-export type FusionStrategy = 'weighted' | 'max' | 'and' | 'or';
 export type Modality = 'audio' | 'image';
 
 export interface EventResponse {
@@ -12,11 +11,9 @@ export interface EventResponse {
   has_audio: boolean;
   has_frame: boolean;
   has_embedding: boolean;
-  // Multimodal (v0.3) — null en eventos de versiones antiguas
-  audio_score: number | null;
-  video_score: number | null;
-  combined_score: number | null;
-  dominant_modality: string | null;
+  // Segmentación de eventos (ADR-0014) — null en eventos antiguos
+  end_timestamp: string | null;
+  duration_s: number | null;
 }
 
 export interface SimilarEventResponse {
@@ -27,12 +24,6 @@ export interface SimilarEventResponse {
 export interface SpectrogramResponse {
   sample_rate: number;
   spectrogram: number[][]; // mel en dB (bandas × frames)
-}
-
-export interface FusionConfig {
-  strategy: FusionStrategy;
-  audio_weight: number; // 0..1
-  gates: boolean;
 }
 
 export interface BoundingBox {
@@ -58,17 +49,5 @@ export interface AnomalyScoreMessage {
   top_drift_features: string[];
   refit_count: number;
   refit_reason: string;
-  audio_score: number;
-  video_score: number;
-  combined_score: number;
-  fast_audio_score: number;
-  slow_audio_score: number;
-  fast_video_score: number;
-  slow_video_score: number;
-  slow_enabled: boolean;
-  slow_audio_fitted: boolean;
-  slow_video_fitted: boolean;
   top_audio_features: string[];
-  top_video_features: string[];
-  dominant_modality: string;
 }

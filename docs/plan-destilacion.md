@@ -10,7 +10,7 @@
 |---|---|---|
 | 0 — Línea base y huella de detección | ✅ Hecho | (este commit) |
 | 1 — EMD fuera, mel como detalle del evento | ✅ Hecho (SPA sin compilar aquí) | ver bitácora |
-| 2 — Retirar fusión, detector de video y modelos lentos | ⏳ | |
+| 2 — Retirar fusión, detector de video y modelos lentos | ✅ Hecho (SPA sin compilar aquí) | ver bitácora |
 | 3 — "Fuente probable" → "movimiento principal" | ⏳ | |
 | 4 — Retirar Streamlit (adelantado, antes del 2) | ✅ Hecho | ver bitácora |
 | 5 — Dependencias y código muerto | ⏳ | |
@@ -48,7 +48,8 @@ Cada paso debe pasar esta puerta antes del commit:
    del informe por sonido. Escenarios `events` y `quiet`.
 2. Los tests del núcleo (`test_detection_regressions.py`, `test_detection.py`,
    `test_base_detector.py`, `test_events.py`, `test_dsp.py`) pasan **sin modificarse**.
-3. `pytest` completo verde; `pylint src/` ≥ 8.72; smoke de imports del pipeline y la API.
+3. `pytest` completo verde; `pylint src/` **sin avisos nuevos** (criterio corregido en el Paso 2,
+   ver bitácora); smoke de imports del pipeline y la API.
 4. Sin restos de lo retirado (grep) fuera de documentos históricos.
 5. Antes del merge, en el Mac del usuario: `npm test`, `npm run build` y una prueba real.
 
@@ -88,3 +89,20 @@ Determinismo comprobado: dos corridas seguidas de `events` dan hashes e informe 
   - **Puerta:** huella idéntica; `pytest` 254 passed (salen 24 tests del cliente Streamlit);
     `pylint` 8.72 (baja de 8.76 porque el código retirado puntuaba por encima de la media,
     sigue ≥ línea base); imports OK.
+- **2026-11-19 · Paso 2** — Se borran `src/fusion/` y `src/vision_detection/`; el pipeline
+  pierde detector de video, calibradores, estrategias de fusión, modelos lentos y el sondeo
+  de `/internal/fusion-config`. La decisión de evento es `result.is_anomaly` (lo que ya
+  ocurría por defecto). API: fuera `/internal/fusion-config` (GET/POST), `FusionConfigMessage`
+  y los campos WS de fusión/video/lento; `EventResponse` sin campos de fusión. ORM: se dejan de
+  mapear las columnas de fusión/lentos; las bases existentes las conservan (nullable) y
+  SQLAlchemy las ignora — test nuevo con una BD v0.3 que lee y vuelve a insertar.
+  SPA: fuera `FusionControls`, el store Zustand, `lib/fusion.ts` y los tiles lentos/video;
+  `useResetDetector` pasa a `hooks/useDetector.ts`; los "top contributors" quedan solo con audio.
+  - **Puerta:** huella idéntica; `pytest` 228 passed (salen `test_fusion`, `test_calibration`,
+    `test_video_detection` y 5 tests de fusion-config del pipeline; entran 3 tests nuevos).
+  - **Hallazgo / criterio corregido:** `pylint` baja de 8.72 a 8.62 **sin ningún aviso nuevo**
+    (140 → 125 avisos): la nota es un promedio y el código borrado tenía pocos avisos por línea.
+    La puerta "nota ≥ 8.72" no sirve para una tarea que borra código; pasa a ser "sin avisos
+    nuevos" (diff de avisos antes/después, ignorando números de línea).
+  - **Pendiente en el Mac:** `zustand` queda sin uso en `web/package.json`, pero quitarlo exige
+    regenerar `package-lock.json` contra el registro npm privado (`npm uninstall zustand`).

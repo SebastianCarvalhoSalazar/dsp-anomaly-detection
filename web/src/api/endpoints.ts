@@ -2,7 +2,6 @@ import { request } from './client';
 import type {
   AnomalyScoreMessage,
   EventResponse,
-  FusionConfig,
   Modality,
   SpectrogramResponse,
   SimilarEventResponse,
@@ -50,10 +49,7 @@ export const searchSimilarUpload = (
   return request(`/search/similar${qs({ modality, k })}`, { method: 'POST', body: form });
 };
 
-export const getFusionConfig = (): Promise<FusionConfig> => request('/internal/fusion-config');
 
-export const setFusionConfig = (cfg: FusionConfig): Promise<unknown> =>
-  request('/internal/fusion-config', { method: 'POST', json: cfg });
 
 export const resetDetector = (): Promise<unknown> =>
   request('/internal/reset-detector', { method: 'POST' });
