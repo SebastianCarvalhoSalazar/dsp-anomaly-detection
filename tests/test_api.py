@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import cv2
 import numpy as np
 import pytest
 import soundfile as sf
@@ -84,41 +85,12 @@ def test_list_events_empty(client):
 
 
 # ---------------------------------------------------------------------------
-# Internal: live fusion config (dashboard → pipeline control channel)
+# Removed: live fusion config channel (ADR-0015)
 # ---------------------------------------------------------------------------
 
-def test_fusion_config_default(client):
-    resp = client.get("/internal/fusion-config")
-    assert resp.status_code == 200
-    cfg = resp.json()
-    assert cfg == {"strategy": "weighted", "audio_weight": 0.5, "gates": False}
-
-
-def test_fusion_config_set_and_get(client):
-    resp = client.post(
-        "/internal/fusion-config",
-        json={"strategy": "max", "audio_weight": 0.3, "gates": True},
-    )
-    assert resp.status_code == 200
-    # GET reflects the new config.
-    cfg = client.get("/internal/fusion-config").json()
-    assert cfg == {"strategy": "max", "audio_weight": 0.3, "gates": True}
-
-
-def test_fusion_config_clamps_weight(client):
-    client.post(
-        "/internal/fusion-config",
-        json={"strategy": "weighted", "audio_weight": 5.0, "gates": False},
-    )
-    assert client.get("/internal/fusion-config").json()["audio_weight"] == 1.0
-
-
-def test_fusion_config_rejects_unknown_strategy(client):
-    resp = client.post(
-        "/internal/fusion-config",
-        json={"strategy": "bogus", "audio_weight": 0.5, "gates": False},
-    )
-    assert resp.status_code == 422
+def test_fusion_config_endpoint_is_gone(client):
+    assert client.get("/internal/fusion-config").status_code in (404, 405)
+    assert client.post("/internal/fusion-config", json={}).status_code in (404, 405)
 
 
 def test_list_events_returns_saved(client, tmp_stores, tmp_path):
@@ -281,11 +253,11 @@ def test_annotated_frame_with_boxes(
     boxes = [
         {
             "x": 10, "y": 10, "w": 40, "h": 30,
-            "source_score": 0.42,
+            "motion_score": 0.42,
         },
         {
             "x": 80, "y": 50, "w": 30, "h": 20,
-            "source_score": 0.18,
+            "motion_score": 0.18,
         },
     ]
     app = create_app(
@@ -304,6 +276,30 @@ def test_annotated_frame_with_boxes(
         # Annotated image should differ from raw
         raw = c.get(f"/events/{eid}/frame")
         assert len(resp.content) != len(raw.content)
+
+
+def _red_at(jpeg: bytes, x: int, y: int) -> bool:
+    img = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
+    b, g, r = (int(v) for v in img[y, x])
+    return r > 150 and b < 130
+
+
+@pytest.mark.parametrize("key", ["motion_score", "source_score"])
+def test_annotated_frame_draws_main_motion_box(client, tmp_stores, tmp_path, key):
+    """The box with the highest motion score is drawn. Events stored before
+    ADR-0015 use the old key "source_score" and must still annotate."""
+    db, faiss_store, event_store = tmp_stores
+    boxes = [
+        {"x": 10, "y": 20, "w": 40, "h": 30, key: 0.18},
+        {"x": 90, "y": 40, "w": 50, "h": 40, key: 0.42},   # main motion
+    ]
+    app = create_app(db=db, faiss_store=faiss_store, event_store=event_store)
+    with TestClient(app) as c:
+        eid = _insert_event_with_frame(db, event_store, tmp_path, boxes=boxes)
+        jpeg = c.get(f"/events/{eid}/frame/annotated").content
+    # Bottom edge of the winning box is red; the other box is not drawn.
+    assert _red_at(jpeg, 90 + 25, 40 + 40)
+    assert not _red_at(jpeg, 10 + 20, 20 + 30)
 
 
 # ---------------------------------------------------------------------------
@@ -461,19 +457,18 @@ def test_reset_pending_is_false_by_default(client):
 
 
 # ---------------------------------------------------------------------------
-# GET /events/{id}/offline_analysis
+# GET /events/{id}/spectrogram
 # ---------------------------------------------------------------------------
 
-def test_offline_analysis_not_found(client):
-    resp = client.get("/events/9999/offline_analysis")
+def test_spectrogram_not_found(client):
+    resp = client.get("/events/9999/spectrogram")
     assert resp.status_code == 404
 
 
-def test_offline_analysis_returns_imfs_and_spectrogram(tmp_stores, tmp_path):
+def test_spectrogram_returns_mel_db(tmp_stores, tmp_path):
     db, faiss_store, event_store = tmp_stores
     app = create_app(db=db, faiss_store=faiss_store, event_store=event_store)
     with TestClient(app) as c:
-        # Use a long-enough audio clip (2 seconds) so EMD can extract multiple IMFs
         audio = np.random.randn(16000 * 2).astype(np.float32)
         ts = datetime(2024, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
         event_dir = event_store.save_event(ts, audio, 16000, frame=None, anomaly_score=0.8)
@@ -484,19 +479,19 @@ def test_offline_analysis_returns_imfs_and_spectrogram(tmp_stores, tmp_path):
         )
         event_id = db.save_event(orm_event)
 
-        resp = c.get(f"/events/{event_id}/offline_analysis")
+        resp = c.get(f"/events/{event_id}/spectrogram")
         assert resp.status_code == 200
         data = resp.json()
-        assert "imfs" in data
-        assert "spectrogram" in data
-        assert "sample_rate" in data
+        assert set(data) == {"sample_rate", "spectrogram"}
         assert data["sample_rate"] == 16000
-        assert data["n_imfs"] >= 1
-        assert len(data["imfs"]) == data["n_imfs"]
-        # Each IMF is a list of floats
-        assert isinstance(data["imfs"][0], list)
-        # Spectrogram has shape (n_mel_bands, n_frames)
-        assert len(data["spectrogram"]) > 0
+        # (n_mel_bands, n_frames); librosa default = 128 mel bands, values in dB ≤ 0
+        assert len(data["spectrogram"]) == 128
+        assert len(data["spectrogram"][0]) > 0
+        assert max(max(r) for r in data["spectrogram"]) <= 1e-6
+
+    # The EMD endpoint no longer exists.
+    with TestClient(app) as c:
+        assert c.get(f"/events/{event_id}/offline_analysis").status_code == 404
 
 
 # ---------------------------------------------------------------------------

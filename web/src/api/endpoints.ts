@@ -2,9 +2,8 @@ import { request } from './client';
 import type {
   AnomalyScoreMessage,
   EventResponse,
-  FusionConfig,
   Modality,
-  OfflineAnalysisResponse,
+  SpectrogramResponse,
   SimilarEventResponse,
 } from './types';
 
@@ -33,8 +32,8 @@ export const deleteEvent = (id: number): Promise<void> =>
 
 export const deleteAllEvents = (): Promise<void> => request('/events/', { method: 'DELETE' });
 
-export const getOfflineAnalysis = (id: number): Promise<OfflineAnalysisResponse> =>
-  request(`/events/${id}/offline_analysis`);
+export const getSpectrogram = (id: number): Promise<SpectrogramResponse> =>
+  request(`/events/${id}/spectrogram`);
 
 export const searchSimilarByEvent = (id: number, k = 5): Promise<SimilarEventResponse[]> =>
   request(`/search/similar/by-event/${id}${qs({ k })}`);
@@ -50,10 +49,7 @@ export const searchSimilarUpload = (
   return request(`/search/similar${qs({ modality, k })}`, { method: 'POST', body: form });
 };
 
-export const getFusionConfig = (): Promise<FusionConfig> => request('/internal/fusion-config');
 
-export const setFusionConfig = (cfg: FusionConfig): Promise<unknown> =>
-  request('/internal/fusion-config', { method: 'POST', json: cfg });
 
 export const resetDetector = (): Promise<unknown> =>
   request('/internal/reset-detector', { method: 'POST' });

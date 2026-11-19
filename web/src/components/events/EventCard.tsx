@@ -1,5 +1,10 @@
+import { useState } from 'react';
+
 import type { EventResponse } from '@/api/types';
+import { Heatmap } from '@/components/charts/Heatmap';
 import { AnnotatedFrame, AudioPlayer } from '@/components/common/Media';
+import { ErrorState, LoadingSkeleton } from '@/components/common/States';
+import { useSpectrogram } from '@/hooks/useSpectrogram';
 import { fmtScore, fmtTimestamp } from '@/lib/format';
 import { scoreColorClass } from '@/lib/status';
 
@@ -10,6 +15,8 @@ export function EventCard({
   event: EventResponse;
   onDelete: (id: number) => void;
 }) {
+  const [showSpec, setShowSpec] = useState(false);
+  const spec = useSpectrogram(event.id, showSpec && event.has_audio);
   return (
     <div className="rounded-lg border border-line bg-surface p-5 shadow-panel transition-colors hover:border-primary/40">
       <div className="flex items-start justify-between">
@@ -35,8 +42,26 @@ export function EventCard({
         )}
       </div>
 
+      {showSpec && (
+        <div className="mt-3">
+          {spec.isLoading && <LoadingSkeleton rows={2} />}
+          {spec.isError && <ErrorState message={(spec.error as Error).message} />}
+          {spec.data && <Heatmap z={spec.data.spectrogram} height={160} />}
+        </div>
+      )}
+
       <div className="mt-4 flex items-center justify-between font-mono text-xs">
         <span className="text-dim">embedding {event.has_embedding ? '✓' : '—'}</span>
+        {event.has_audio && (
+          <button
+            type="button"
+            aria-expanded={showSpec}
+            onClick={() => setShowSpec((v) => !v)}
+            className="rounded-md px-3 py-1.5 font-semibold uppercase tracking-wide text-primary hover:bg-primary/10"
+          >
+            {showSpec ? 'Ocultar espectrograma' : 'Espectrograma'}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => onDelete(event.id)}

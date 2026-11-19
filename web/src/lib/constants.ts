@@ -1,13 +1,6 @@
-import type { FusionStrategy, Modality } from '@/api/types';
+import type { Modality } from '@/api/types';
 
 export const HISTORY_CAPACITY = 300;
-
-export const FUSION_STRATEGIES: { value: FusionStrategy; label: string }[] = [
-  { value: 'weighted', label: 'Weighted Average' },
-  { value: 'max', label: 'Maximum' },
-  { value: 'and', label: 'AND' },
-  { value: 'or', label: 'OR' },
-];
 
 export const MODALITIES: { value: Modality; label: string; icon: string }[] = [
   { value: 'audio', label: 'Audio', icon: '🎤' },

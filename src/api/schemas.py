@@ -15,11 +15,6 @@ class EventResponse(BaseModel):
     has_audio: bool
     has_frame: bool
     has_embedding: bool
-    # Multimodal fields (v0.3) — None for events written by older versions
-    audio_score: Optional[float] = None
-    video_score: Optional[float] = None
-    combined_score: Optional[float] = None
-    dominant_modality: Optional[str] = None
     # Event segmentation (plan-correcciones F5) — None for older events
     end_timestamp: Optional[datetime] = None
     duration_s: Optional[float] = None
@@ -48,38 +43,10 @@ class AnomalyScoreMessage(BaseModel):
     top_drift_features: list[str] = []
     refit_count: int = 0
     refit_reason: str = "scheduled"
-    # -- Multimodal scores (v0.3) ------------------------------------------
-    # Defaults keep older dashboard clients working. In single-modality
-    # operation audio_score == combined_score == anomaly_score.
-    audio_score: float = 0.0
-    video_score: float = 0.0
-    combined_score: float = 0.0
-    fast_audio_score: float = 0.0
-    slow_audio_score: float = 0.0
-    fast_video_score: float = 0.0
-    slow_video_score: float = 0.0
-    # Estado del detector lento (doble horizonte): permite al dashboard mostrar
-    # "calibrando" vs "apagado" en vez de un 0.0 ambiguo.
-    slow_enabled: bool = False
-    slow_audio_fitted: bool = False
-    slow_video_fitted: bool = False
+    # Explainability: top contributing audio features (z-score vs baseline)
     top_audio_features: list[str] = []
-    top_video_features: list[str] = []
-    dominant_modality: str = "audio"
 
 
-class FusionConfigMessage(BaseModel):
-    """Live fusion configuration driven from the dashboard and polled by the
-    pipeline. ``strategy`` is one of weighted|max|and|or; ``gates`` toggles
-    whether the fused score drives the event-gating decision."""
-
-    strategy: str = "weighted"
-    audio_weight: float = 0.5
-    gates: bool = False
-
-
-class OfflineAnalysisResponse(BaseModel):
-    imfs: list[list[float]]          # list of IMF arrays (time series)
-    n_imfs: int
+class SpectrogramResponse(BaseModel):
     sample_rate: int
     spectrogram: list[list[float]]   # mel-spectrogram as nested list (freq x time)

@@ -9,14 +9,19 @@ import librosa
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
-from PyEMD import EMD
 
 from src.api.dependencies import get_db, get_event_store, get_faiss_store
-from src.api.schemas import EventResponse, OfflineAnalysisResponse
+from src.api.schemas import EventResponse, SpectrogramResponse
 from src.storage import Database, EventStore, FAISSStore
 from src.storage.models import AnomalyEvent
 
 router = APIRouter(prefix="/events", tags=["events"])
+
+
+def _box_motion_score(box: dict) -> float:
+    """Main-motion score of a stored box. Events stored before ADR-0015 carry
+    the same ranking under the old key ``source_score``."""
+    return float(box.get("motion_score", box.get("source_score", 0)))
 
 
 def _event_to_response(event: AnomalyEvent) -> EventResponse:
@@ -30,10 +35,6 @@ def _event_to_response(event: AnomalyEvent) -> EventResponse:
         has_audio=(event_dir / "audio.wav").exists(),
         has_frame=(event_dir / "frame.jpg").exists(),
         has_embedding=(event_dir / "embedding.npy").exists(),
-        audio_score=event.audio_score,
-        video_score=event.video_score,
-        combined_score=event.combined_score,
-        dominant_modality=event.dominant_modality,
         end_timestamp=event.end_timestamp,
         duration_s=event.duration_s,
     )
@@ -149,14 +150,10 @@ async def get_annotated_frame(
 
         h, w = frame.shape[:2]
 
-        # Pick the single best box (highest source_score)
-        best = max(
-            boxes,
-            key=lambda b: b.get("source_score", 0),
-        )
+        best = max(boxes, key=_box_motion_score)
         bx, by = int(best["x"]), int(best["y"])
         bw, bh = int(best["w"]), int(best["h"])
-        ss = best.get("source_score", 0)
+        ss = _box_motion_score(best)
 
         colour = (60, 60, 230)  # red BGR
         cv2.rectangle(
@@ -167,7 +164,7 @@ async def get_annotated_frame(
             2,
         )
 
-        label = f"source {ss:.3f}"
+        label = f"motion {ss:.3f}"
         font = cv2.FONT_HERSHEY_SIMPLEX
         (tw, th), _ = cv2.getTextSize(
             label, font, 0.5, 1,
@@ -240,32 +237,22 @@ async def clear_events(
     await anyio.to_thread.run_sync(faiss_store.clear)
 
 
-@router.get("/{event_id}/offline_analysis", response_model=OfflineAnalysisResponse)
-async def get_offline_analysis(
+@router.get("/{event_id}/spectrogram", response_model=SpectrogramResponse)
+async def get_spectrogram(
     event_id: int,
     db: Database = Depends(get_db),
     event_store: EventStore = Depends(get_event_store),
-) -> OfflineAnalysisResponse:
-    """Run EMD and compute mel spectrogram on the stored audio for an event."""
+) -> SpectrogramResponse:
+    """Mel spectrogram (dB) of an event's stored audio, computed on demand."""
     event = await anyio.to_thread.run_sync(lambda: db.get_event(event_id))
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    def _analyze() -> OfflineAnalysisResponse:
+    def _analyze() -> SpectrogramResponse:
         audio, sr = event_store.load_audio(Path(event.event_dir))
-        signal = audio.astype(np.float64)
-
-        emd = EMD()
-        imfs = emd.emd(signal)  # (n_imfs, time) or (time,) if single IMF
-        if imfs.ndim == 1:
-            imfs = imfs[np.newaxis, :]
-
         mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr)
         mel_db = librosa.power_to_db(mel_spec, ref=np.max)
-
-        return OfflineAnalysisResponse(
-            imfs=[row.tolist() for row in imfs],
-            n_imfs=len(imfs),
+        return SpectrogramResponse(
             sample_rate=sr,
             spectrogram=[row.tolist() for row in mel_db],
         )

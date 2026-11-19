@@ -18,19 +18,6 @@ import numpy as np
 
 
 @dataclass
-class AudioWindow:
-    """A processed audio window with explicit start/end timestamps (Unix)."""
-
-    start_timestamp: float
-    end_timestamp: float
-
-    @property
-    def timestamp(self) -> float:
-        """Representative instant of the window (its midpoint)."""
-        return (self.start_timestamp + self.end_timestamp) / 2.0
-
-
-@dataclass
 class CapturedFrame:
     """A camera frame tagged with the Unix timestamp at capture time."""
 

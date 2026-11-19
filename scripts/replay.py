@@ -18,6 +18,7 @@ All storage goes to a temporary directory; nothing in ``data/`` is touched.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -163,6 +164,7 @@ def replay(sig: np.ndarray, encode_delay: float, workdir: Path, env: dict):
     n_win = len(sig) // WIN
     service = np.empty(n_win)
     flags = np.zeros(n_win, dtype=bool)
+    raws = np.zeros(n_win)
     t0 = time.time()
     for k in range(n_win):
         sim_now["t"] = (k + 1) * WIN_S  # window end time (scenario clock)
@@ -172,6 +174,7 @@ def replay(sig: np.ndarray, encode_delay: float, workdir: Path, env: dict):
         out = p.process_window(w, t0 + (k + 0.5) * WIN_S)
         service[k] = time.perf_counter() - a
         flags[k] = bool(out.get("gate", False))
+        raws[k] = float(out["result"].raw_score)
     if hasattr(p, "flush_events"):
         # Async event writer: wait for pending writes, then take each event's
         # onset from its stored timestamp (scenario clock = ts - t0).
@@ -183,7 +186,7 @@ def replay(sig: np.ndarray, encode_delay: float, workdir: Path, env: dict):
             for r in rows
         )
     n_db = len(p.db.list_events(limit=100000))
-    return service, flags, saved_at, n_db
+    return service, flags, saved_at, n_db, raws
 
 
 def simulate_drops(service: np.ndarray, period: float, qmax: int = 64) -> int:
@@ -257,7 +260,7 @@ def main(argv=None) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         cwd = os.getcwd()
         try:
-            service, flags, saved_at, n_db = replay(
+            service, flags, saved_at, n_db, raws = replay(
                 sig, args.encode_delay, Path(tmp), env
             )
         finally:
@@ -282,6 +285,14 @@ def main(argv=None) -> int:
         },
         "ventanas_perdidas_simuladas": int(drops),
         "encode_delay_s": args.encode_delay,
+        # Fingerprints of the detector's behaviour: identical hashes mean the
+        # per-window decisions and raw scores did not change (refactor guard).
+        # flags_sha1 is comparable across machines; scores_sha1 only on the
+        # same machine (floating-point results differ across CPU/BLAS).
+        "flags_sha1": hashlib.sha1(flags.astype(np.uint8).tobytes()).hexdigest(),
+        "scores_sha1": hashlib.sha1(
+            np.round(raws, 6).astype(np.float64).tobytes()
+        ).hexdigest(),
     }
     txt = json.dumps(report, indent=2, ensure_ascii=False)
     print(txt)

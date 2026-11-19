@@ -1,6 +1,6 @@
 # ADR-0013: Reemplazo del dashboard Streamlit por un SPA (React + TypeScript)
 
-- **Estado:** Aceptado
+- **Estado:** Aceptado — completado por [ADR-0015](0015-destilacion-del-sistema.md): el dashboard Streamlit se retiró (fase F8 cerrada)
 - **Fecha:** 2026-06-30
 - **Decisores:** Sebastian Carvalho
 - **Fase:** Frontend (post-v0.3)

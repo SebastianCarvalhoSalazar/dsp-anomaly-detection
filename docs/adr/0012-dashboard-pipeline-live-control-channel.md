@@ -1,6 +1,6 @@
 # ADR-0012: Canal de control dashboard → pipeline en vivo
 
-- **Estado:** Aceptado
+- **Estado:** Reemplazado por [ADR-0015](0015-destilacion-del-sistema.md) — el componente se retiró del código (documento histórico)
 - **Fecha:** 2026-06-21
 - **Decisores:** Equipo del proyecto
 - **Fase:** post-v0.3

@@ -114,7 +114,7 @@ def test_temporal_weight_new_box():
         ),
     ]
     det.assign_temporal_weights(boxes)
-    assert boxes[0].source_score == 1.0
+    assert boxes[0].temporal_weight == 1.0
 
 
 def test_temporal_weight_persistent_box():
@@ -132,24 +132,25 @@ def test_temporal_weight_persistent_box():
         ),
     ]
     det.assign_temporal_weights(boxes)
-    assert boxes[0].source_score == 0.5
+    assert boxes[0].temporal_weight == 0.5
 
 
-def test_detect_assigns_source_score():
-    """detect() should set source_score on returned boxes."""
+def test_detect_assigns_temporal_weight():
+    """detect() should set temporal_weight on returned boxes."""
     config = VisionConfig(min_contour_area=100)
     det = MotionDetector(config)
     _warmup(det)
     boxes = det.detect(_frame_with_patch())
     if boxes:
         # First detection → new boxes → weight 1.0
-        assert boxes[0].source_score == 1.0
+        assert boxes[0].temporal_weight == 1.0
 
 
-def test_source_score_default_zero():
-    """BoundingBox created without source_score defaults to 0."""
+def test_weights_and_motion_score_default_zero():
+    """A BoundingBox created without scores defaults both to 0."""
     b = BoundingBox(x=0, y=0, w=10, h=10, area=100)
-    assert b.source_score == 0.0
+    assert b.temporal_weight == 0.0
+    assert b.motion_score == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -277,42 +278,6 @@ def test_merge_chain_blocked_by_max_area():
 
 
 # ---------------------------------------------------------------------------
-# MotionDetector — draw_boxes
-# ---------------------------------------------------------------------------
-
-def test_draw_boxes_returns_copy():
-    det = MotionDetector()
-    frame = _black_frame()
-    boxes = [BoundingBox(x=10, y=10, w=50, h=50, area=2500)]
-    annotated = det.draw_boxes(frame, boxes)
-    assert annotated is not frame
-
-
-def test_draw_boxes_same_shape():
-    det = MotionDetector()
-    frame = _black_frame()
-    boxes = [BoundingBox(x=10, y=10, w=50, h=50, area=2500)]
-    annotated = det.draw_boxes(frame, boxes)
-    assert annotated.shape == frame.shape
-
-
-def test_draw_boxes_modifies_pixels():
-    det = MotionDetector()
-    frame = _black_frame()
-    boxes = [BoundingBox(x=10, y=10, w=100, h=100, area=10000)]
-    annotated = det.draw_boxes(frame, boxes)
-    # The green rectangle line must alter at least one pixel
-    assert not np.array_equal(annotated, frame)
-
-
-def test_draw_boxes_no_boxes_unchanged():
-    det = MotionDetector()
-    frame = _black_frame()
-    annotated = det.draw_boxes(frame, [])
-    np.testing.assert_array_equal(annotated, frame)
-
-
-# ---------------------------------------------------------------------------
 # MotionDetector — reset
 # ---------------------------------------------------------------------------
 
@@ -330,22 +295,6 @@ def test_reset_reinitializes_background():
     # Verify detector remains usable
     boxes = det.detect(_black_frame())
     assert isinstance(boxes, list)
-
-
-# ---------------------------------------------------------------------------
-# MotionDetector — detect_with_result
-# ---------------------------------------------------------------------------
-
-def test_detect_with_result_returns_motion_result():
-    from src.vision.types import MotionResult
-    config = VisionConfig(min_contour_area=100)
-    det = MotionDetector(config)
-    _warmup(det)
-    result = det.detect_with_result(_frame_with_patch())
-    assert isinstance(result, MotionResult)
-    assert result.annotated_frame.shape == result.frame.shape
-    assert isinstance(result.has_motion, bool)
-    assert result.timestamp > 0
 
 
 # ---------------------------------------------------------------------------

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import time
-
 import cv2
 import numpy as np
 
 from .config import VisionConfig
-from .types import BoundingBox, MotionResult
+from .types import BoundingBox
 
 
 class MotionDetector:
@@ -195,15 +193,14 @@ class MotionDetector:
     def assign_temporal_weights(
         self, boxes: list[BoundingBox],
     ) -> None:
-        """Set ``source_score`` on each box to a temporal weight.
+        """Set ``temporal_weight`` on each box.
 
         A box that overlaps significantly (IoU > 0.3) with a
         previous-frame box is considered *persistent* and receives
         weight 0.5.  A new box gets weight 1.0.
 
-        The pipeline will later multiply this weight by the area
-        ratio and anomaly score to produce the final
-        ``source_score``.
+        The pipeline multiplies this weight by the box's area ratio to
+        rank the frame's main motion (``motion_score``).
         """
         for box in boxes:
             best_iou = 0.0
@@ -212,46 +209,9 @@ class MotionDetector:
                 if iou > best_iou:
                     best_iou = iou
             # New box → 1.0; persistent → 0.5
-            box.source_score = (
+            box.temporal_weight = (
                 0.5 if best_iou > 0.3 else 1.0
             )
-
-    def detect_with_result(self, frame: np.ndarray) -> MotionResult:
-        """Detect motion and return a MotionResult with annotated frame."""
-        boxes = self.detect(frame)
-        annotated = self.draw_boxes(frame, boxes)
-        return MotionResult(
-            frame=frame,
-            annotated_frame=annotated,
-            boxes=boxes,
-            has_motion=len(boxes) > 0,
-            timestamp=time.time(),
-        )
-
-    def draw_boxes(self, frame: np.ndarray, boxes: list[BoundingBox]) -> np.ndarray:
-        """Return a copy of frame with bounding boxes drawn in green.
-
-        Parameters
-        ----------
-        frame : np.ndarray
-            BGR frame.
-        boxes : list[BoundingBox]
-
-        Returns
-        -------
-        np.ndarray
-            New array (not in-place modification).
-        """
-        annotated = frame.copy()
-        for box in boxes:
-            cv2.rectangle(
-                annotated,
-                (box.x, box.y),
-                (box.x + box.w, box.y + box.h),
-                color=(0, 255, 0),
-                thickness=2,
-            )
-        return annotated
 
     def reset(self) -> None:
         """Reinitialize the background model. Use after scene changes."""

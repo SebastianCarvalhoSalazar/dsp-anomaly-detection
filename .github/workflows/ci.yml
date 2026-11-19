@@ -45,10 +45,37 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction
 
-      # Umbral por debajo del score actual (8.72): bloquea regresiones sin
+      # Umbral por debajo del score actual (8.63 tras ADR-0015; la nota bajó por
+      # borrar código limpio, sin avisos nuevos): bloquea regresiones sin
       # exigir limpiar todo el backlog de pylint de una vez.
       - name: Lint
         run: poetry run pylint src/ --fail-under=8.5
 
       - name: Tests
         run: poetry run pytest -q
+
+  web:
+    name: Tests + build (dashboard web)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Tests
+        run: npm test
+
+      # typecheck (tsc --noEmit) + build de producción
+      - name: Build
+        run: npm run build

@@ -7,7 +7,6 @@ const LINKS = [
   { to: '/', label: 'Monitor', code: 'LIVE', icon: '◉', end: true },
   { to: '/eventos', label: 'Eventos', code: 'EVTS', icon: '▤', end: false },
   { to: '/busqueda', label: 'Búsqueda', code: 'SRCH', icon: '⌕', end: false },
-  { to: '/offline', label: 'Offline', code: 'ANLZ', icon: '∿', end: false },
 ];
 
 export function NavBar() {

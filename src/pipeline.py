@@ -3,10 +3,11 @@
 Run with:
     poetry run python -m src.pipeline
 
-The pipeline reads audio from the microphone and video from the camera, runs
-DSP feature extraction, scores each window for anomalies, and when an anomaly
-is confirmed: generates multimodal embeddings, persists the event, indexes it
-in FAISS, and notifies the API (which broadcasts to WebSocket clients).
+The pipeline reads audio from the microphone and frames from the camera, runs
+DSP feature extraction and scores each audio window for anomalies. Consecutive
+anomalous windows form one event, which is persisted off the audio loop (audio
+clip, frame, multimodal embedding, FAISS index, SQLite row). Every window's
+score is sent to the API, which broadcasts it to WebSocket clients.
 
 Requires a running API server (uvicorn src.api.main:app) to broadcast scores.
 """
@@ -29,7 +30,7 @@ import sounddevice as sd
 from dotenv import load_dotenv
 
 # Carga variables desde el .env de la raíz del repo (si existe) para que
-# EVENTS_DIR, DB_PATH, CORS_ORIGINS, ENABLE_SLOW_MODELS, etc. surtan efecto sin
+# EVENTS_DIR, DB_PATH, CORS_ORIGINS, ENABLE_DRIFT, etc. surtan efecto sin
 # tener que exportarlas manualmente. Una variable ya presente en el entorno
 # tiene prioridad (load_dotenv no sobrescribe por defecto).
 from pathlib import Path as _Path
@@ -40,23 +41,16 @@ from src.detection import AnomalyDetector, DetectorConfig, SnapshotStore
 from src.dsp import AudioProcessor, DSPConfig
 from src.embeddings import MultimodalEncoder
 from src.events import EventSegmenter, EventWriter, SegmentedEvent
-from src.fusion import (
-    FusionResult, PercentileCalibrator, WeightedAverage, make_strategy,
-)
 from src.storage import Database, EventStore, FAISSStore, StorageConfig
 from src.storage.models import AnomalyEvent
 from src.sync import FrameRingBuffer
 from src.vision import FrameCapture, MotionDetector, VisionConfig
-from src.vision_detection import (
-    VideoAnomalyDetector, VideoFeatureExtractor, default_video_config,
-)
 
 logger = logging.getLogger(__name__)
 
 _API_BASE = os.getenv("API_BASE_URL", "http://localhost:8000")
 API_INTERNAL_URL = _API_BASE + "/internal/score"
 API_RESET_PENDING_URL = _API_BASE + "/internal/reset-pending"
-API_FUSION_CONFIG_URL = _API_BASE + "/internal/fusion-config"
 
 def _env_flag(name: str, default: bool = False) -> bool:
     """Boolean env var: 1/true/yes (case-insensitive) → True."""
@@ -103,14 +97,12 @@ class Pipeline:
             faiss_path=os.getenv("FAISS_PATH", "data/faiss.index"),
         )
         self.dsp = AudioProcessor(DSPConfig())
-        # Fase 6 (ADR-0014): components that do not drive the event decision
-        # are opt-in. Drift (C2ST + drift-aware refits) is biased by overlapping
+        # ADR-0014: components that do not drive the event decision are
+        # opt-in. Drift (C2ST + drift-aware refits) is biased by overlapping
         # buffers and works against the anomaly quarantine; snapshots write a
-        # model to disk on every refit; the video detector + fusion only gate
-        # events when FUSION_GATES_DECISION is on.
+        # model to disk on every refit.
         self._enable_drift = _env_flag("ENABLE_DRIFT")
         self._enable_snapshots = _env_flag("ENABLE_SNAPSHOTS")
-        self._enable_video = _env_flag("ENABLE_VIDEO_DETECTOR")
         snap_root = os.getenv("SNAPSHOTS_DIR", "data/snapshots")
 
         def _snapshots(sub: str) -> Optional[SnapshotStore]:
@@ -143,57 +135,6 @@ class Pipeline:
         self.vision = MotionDetector(VisionConfig())
         self.frame_capture = FrameCapture(VisionConfig())
 
-        # --- Multimodal detection (v0.3) ---------------------------------
-        # Independent video detector + per-modality score calibration +
-        # configurable late fusion. The final event-gating decision still
-        # follows the audio detector (the fast, established path); the fused
-        # combined_score is calibrated, exposed and stored for observability.
-        video_cfg = default_video_config()
-        video_cfg.enable_drift_detection = self._enable_drift
-        self.video_detector = VideoAnomalyDetector(
-            video_cfg, snapshot_store=_snapshots("video"),
-        )
-        if self._enable_video and self.video_detector.load_state():
-            logger.info("Loaded video detector state from disk.")
-        self.video_extractor = VideoFeatureExtractor()
-        self.audio_calibrator = PercentileCalibrator()
-        self.video_calibrator = PercentileCalibrator()
-        self.fusion_strategy = WeightedAverage(audio_weight=0.5)
-        # By default the event-gating decision follows the audio detector (the
-        # established fast path). Opt-in to let the fused combined_score gate
-        # events instead — keep off until FP/FN are validated on real data.
-        self._fusion_gates = _env_flag("FUSION_GATES_DECISION")
-        # Snapshot of the live fusion config (driven from the dashboard).
-        self._fusion_config_current = {
-            "strategy": "weighted",
-            "audio_weight": 0.5,
-            "gates": self._fusion_gates,
-        }
-
-        # Dual horizon (Req 6): an optional "slow" model per modality with a
-        # large buffer reflects long-term behaviour. The final decision still
-        # uses the fast model; slow scores are exposed for observability.
-        # Opt-in (extra compute) via ENABLE_SLOW_MODELS.
-        self._enable_slow = _env_flag("ENABLE_SLOW_MODELS")
-        self.slow_detector: Optional[AnomalyDetector] = None
-        self.slow_video_detector: Optional[VideoAnomalyDetector] = None
-        if self._enable_slow:
-            self.slow_detector = AnomalyDetector(
-                DetectorConfig(
-                    buffer_size=5000, refit_every=2000,
-                    enable_drift_detection=False,
-                ),
-                feature_names=self.dsp.feature_names,
-            )
-            self.slow_video_detector = VideoAnomalyDetector(
-                DetectorConfig(
-                    buffer_size=3000, refit_every=1500,
-                    enable_pca=False, enable_drift_detection=False,
-                    state_path="data/slow_video_detector_state.pkl",
-                )
-            )
-            logger.info("Dual-horizon slow models enabled.")
-
         # Queue for passing audio windows from the sounddevice callback
         # Items are (samples, capture_midpoint_wallclock) — F4.
         self._audio_queue: queue.Queue[tuple[np.ndarray, float]] = queue.Queue(
@@ -212,7 +153,7 @@ class Pipeline:
             maxlen=3 * _sr
         )  # 48 000 samples @ 16 kHz
 
-        # Cross-modal correlation state (3.2)
+        # Fraction of the frame covered by motion boxes (decays when idle)
         self._last_motion_energy: float = 0.0
 
         # F5: one event per anomaly (segmenter) persisted off the audio loop
@@ -287,11 +228,6 @@ class Pipeline:
             # Persistent baseline: save state for next run
             try:
                 self.detector.save_state()
-                if self._enable_video:
-                    self.video_detector.save_state()
-                if self._enable_slow:
-                    self.slow_detector.save_state()
-                    self.slow_video_detector.save_state()
                 logger.info("Detector state saved.")
             except Exception as exc:
                 logger.warning(
@@ -304,57 +240,10 @@ class Pipeline:
             resp = httpx.get(API_RESET_PENDING_URL, timeout=0.5)
             if resp.status_code == 200 and resp.json().get("pending"):
                 self.detector.reset()
-                self.video_detector.reset()
-                if self._enable_slow:
-                    self.slow_detector.reset()
-                    self.slow_video_detector.reset()
                 self._pre_audio_buffer.clear()
                 logger.info("Detector reset: buffer cleared, warmup restarted.")
         except Exception as exc:
             logger.debug("Reset poll failed (API may not be running): %s", exc)
-
-    def _apply_fusion_config(self, cfg: dict) -> None:
-        """Apply a fusion config (from the dashboard) to the live pipeline.
-
-        Rebuilds the fusion strategy and updates the gating mode. Unknown
-        strategy names are ignored (the current strategy is kept).
-        """
-        name = cfg.get("strategy", "weighted")
-        audio_weight = float(cfg.get("audio_weight", 0.5))
-        gates = bool(cfg.get("gates", False))
-        kwargs = {"audio_weight": audio_weight} if name == "weighted" else {}
-        try:
-            self.fusion_strategy = make_strategy(name, **kwargs)
-        except ValueError:
-            logger.warning("Ignoring unknown fusion strategy: %s", name)
-            return
-        self._fusion_gates = gates
-        self._fusion_config_current = {
-            "strategy": name, "audio_weight": audio_weight, "gates": gates,
-        }
-        logger.info(
-            "Fusion config updated: strategy=%s audio_weight=%.2f gates=%s",
-            name, audio_weight, gates,
-        )
-
-    def _check_fusion_config(self) -> None:
-        """Poll the API for the dashboard-driven fusion config and apply it
-        when it changed."""
-        try:
-            resp = httpx.get(API_FUSION_CONFIG_URL, timeout=0.5)
-            if resp.status_code != 200:
-                return
-            cfg = resp.json()
-        except Exception as exc:
-            logger.debug("Fusion-config poll failed: %s", exc)
-            return
-        normalized = {
-            "strategy": cfg.get("strategy", "weighted"),
-            "audio_weight": float(cfg.get("audio_weight", 0.5)),
-            "gates": bool(cfg.get("gates", False)),
-        }
-        if normalized != self._fusion_config_current:
-            self._apply_fusion_config(normalized)
 
     def _process_loop(self) -> None:
         """Consume audio windows, score them, and handle anomalies."""
@@ -370,7 +259,6 @@ class Pipeline:
             _window_count += 1
             if _window_count % _reset_check_interval == 0:
                 self._check_reset()
-                self._check_fusion_config()
 
             self.process_window(window, ts_window)
 
@@ -398,85 +286,10 @@ class Pipeline:
 
         boxes = self.vision.detect(frame) if frame is not None else []
 
-        # --- Video modality -------------------------------------------
-        # Extract motion features while boxes still carry their IoU
-        # temporal weights (the source-ranking below overwrites them).
-        video_array = None
-        video_fitted = False
-        if frame is not None and self._enable_video:
-            video_fv = self.video_extractor.extract(boxes, frame.shape)
-            video_array = video_fv.to_array()
-            video_result = self.video_detector.score(video_array)
-            video_raw = video_result.anomaly_score
-            video_fitted = video_result.is_fitted
-        else:
-            video_raw = 0.0
-
-        # --- Dual horizon (Req 6): slow models, decision uses fast ----
-        slow_audio = 0.0
-        slow_video = 0.0
-        slow_audio_fitted = False
-        slow_video_fitted = False
-        if self._enable_slow:
-            _slow_a = self.slow_detector.score(feature_vec)
-            slow_audio = _slow_a.anomaly_score
-            slow_audio_fitted = _slow_a.is_fitted
-            if video_array is not None:
-                _slow_v = self.slow_video_detector.score(video_array)
-                slow_video = _slow_v.anomaly_score
-                slow_video_fitted = _slow_v.is_fitted
-
-        # --- Calibration + fusion -------------------------------------
-        # F3: only fitted detectors feed their calibrator (warmup zeros
-        # would otherwise fill the history), and there is no fused decision
-        # while the audio detector is still warming up.
-        audio_cal = (
-            self.audio_calibrator.calibrate_and_update(result.anomaly_score)
-            if result.is_fitted else 0.0
-        )
-        video_cal = (
-            self.video_calibrator.calibrate_and_update(video_raw)
-            if video_fitted else 0.0
-        )
-        if result.is_fitted and self._enable_video:
-            fusion = self.fusion_strategy.combine(audio_cal, video_cal)
-        elif result.is_fitted:
-            # Audio only: the "fused" score is the calibrated audio score.
-            fusion = FusionResult(
-                combined_score=audio_cal,
-                is_anomaly=audio_cal >= self.fusion_strategy.threshold,
-                dominant_modality="audio-driven",
-            )
-        else:
-            fusion = FusionResult(
-                combined_score=0.0, is_anomaly=False,
-                dominant_modality="audio-driven",
-            )
-
         # --- Explainability (Req 9): top contributing features --------
-        top_audio = self.detector.top_features(feature_vec)
-        top_video = (
-            self.video_detector.top_features(video_array)
-            if video_array is not None else []
-        )
+        mm = {"top_audio_features": self.detector.top_features(feature_vec)}
 
-        mm = {
-            "audio_score": audio_cal,
-            "video_score": video_cal,
-            "combined_score": fusion.combined_score,
-            "dominant_modality": fusion.dominant_modality,
-            "fast_audio_score": result.anomaly_score,
-            "slow_audio_score": slow_audio,
-            "fast_video_score": video_raw,
-            "slow_video_score": slow_video,
-            "slow_enabled": self._enable_slow,
-            "slow_audio_fitted": slow_audio_fitted,
-            "slow_video_fitted": slow_video_fitted,
-            "top_audio_features": top_audio,
-            "top_video_features": top_video,
-        }
-
-        # Cross-modal correlation (3.2)
+        # Motion context for the window/event
         if boxes and frame is not None:
             frame_area = float(
                 frame.shape[0] * frame.shape[1]
@@ -485,29 +298,21 @@ class Pipeline:
             self._last_motion_energy = min(
                 sum(b.area for b in boxes) / frame_area, 1.0
             )
-            # Source-score ranking (Option B):
-            # score = anomaly_score × area_ratio × temporal_weight
+            # Main motion: rank boxes by area_ratio × temporal_weight (large,
+            # new movement first) and keep the top one. Purely visual context;
+            # it is not correlated with the audio (ADR-0015).
             for b in boxes:
-                area_ratio = b.area / frame_area
-                b.source_score = (
-                    result.anomaly_score
-                    * area_ratio
-                    * b.source_score  # temporal weight
-                )
-            boxes.sort(
-                key=lambda b: b.source_score,
-                reverse=True,
-            )
-            boxes = boxes[:1]  # best match only
+                b.motion_score = (b.area / frame_area) * b.temporal_weight
+            boxes.sort(key=lambda b: b.motion_score, reverse=True)
+            boxes = boxes[:1]
         else:
             self._last_motion_energy *= 0.9  # decay
 
         # Notify API (non-blocking fire-and-forget)
         self._notify_api(result, boxes, rms=rms, mm=mm)
 
-        # Event gating: audio detector by default; the fused decision only
-        # when explicitly enabled (FUSION_GATES_DECISION).
-        gate = fusion.is_anomaly if self._fusion_gates else result.is_anomaly
+        # Event decision: the audio detector (confirmed with hysteresis).
+        gate = result.is_anomaly
         # F5: consecutive anomalous windows form ONE event (start/end/peak);
         # it is persisted off the audio loop when it closes.
         event = self.segmenter.update(
@@ -525,7 +330,6 @@ class Pipeline:
             self.event_writer.submit(self._persist_event, event)
 
         return {"result": result, "boxes": boxes, "mm": mm, "gate": bool(gate)}
-
 
     def flush_events(self) -> None:
         """Close any open event and wait until all events are persisted."""
@@ -581,7 +385,7 @@ class Pipeline:
             {
                 "x": b.x, "y": b.y,
                 "w": b.w, "h": b.h,
-                "source_score": round(b.source_score, 4),
+                "motion_score": round(b.motion_score, 4),
             }
             for b in boxes
         ]
@@ -621,13 +425,7 @@ class Pipeline:
             source_region_json=json.dumps(boxes_json),
             # M13: persist the same metadata to the DB column, not just JSON.
             extra_json=json.dumps(extra_meta),
-            # Calibrated per-modality + fused scores (v0.3).
-            audio_score=mm.get("audio_score", 0.0),
-            video_score=mm.get("video_score", 0.0),
-            combined_score=mm.get("combined_score", 0.0),
-            dominant_modality=mm.get("dominant_modality", "audio"),
             top_audio_features=json.dumps(mm.get("top_audio_features", [])),
-            top_video_features=json.dumps(mm.get("top_video_features", [])),
         )
         # C3/L1: persist the row first to get its PK, then index the embedding
         # in FAISS under that *stable* ID. If FAISS fails, the row simply has a
@@ -661,9 +459,9 @@ class Pipeline:
     ) -> None:
         """POST anomaly score to API for WebSocket broadcast (fire-and-forget).
 
-        The payload includes ``motion_energy`` and ``rms`` plus the calibrated
-        per-modality, fused, fast/slow and explainability fields so the
-        dashboard can correlate signals and recompute fusion strategies live.
+        The payload carries the score, decision and warmup state, the motion
+        context (boxes, ``motion_energy``), ``rms``, the top contributing audio
+        features and the detector's threshold/drift metrics.
         """
         mm = mm or {}
         try:
@@ -679,28 +477,13 @@ class Pipeline:
                     {
                         "x": b.x, "y": b.y,
                         "w": b.w, "h": b.h,
-                        "source_score": round(
-                            b.source_score, 4,
-                        ),
+                        "motion_score": round(b.motion_score, 4),
                     }
                     for b in boxes
                 ],
                 "motion_energy": self._last_motion_energy,
                 "rms": round(rms, 6),
-                # Calibrated per-modality + fused + fast/slow + explainability.
-                "audio_score": round(mm.get("audio_score", 0.0), 6),
-                "video_score": round(mm.get("video_score", 0.0), 6),
-                "combined_score": round(mm.get("combined_score", 0.0), 6),
-                "dominant_modality": mm.get("dominant_modality", "audio"),
-                "fast_audio_score": round(mm.get("fast_audio_score", 0.0), 6),
-                "slow_audio_score": round(mm.get("slow_audio_score", 0.0), 6),
-                "fast_video_score": round(mm.get("fast_video_score", 0.0), 6),
-                "slow_video_score": round(mm.get("slow_video_score", 0.0), 6),
-                "slow_enabled": mm.get("slow_enabled", False),
-                "slow_audio_fitted": mm.get("slow_audio_fitted", False),
-                "slow_video_fitted": mm.get("slow_video_fitted", False),
                 "top_audio_features": mm.get("top_audio_features", []),
-                "top_video_features": mm.get("top_video_features", []),
             }
             # Drift detection metrics
             drift = self.detector.get_drift_metrics()
