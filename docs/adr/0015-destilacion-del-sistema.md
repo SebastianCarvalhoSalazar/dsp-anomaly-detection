@@ -71,5 +71,6 @@ Opción 2:
   `routers/websocket.py`), `src/storage/models.py` y `db.py`, `src/vision/`.
 - SPA: `pages/LiveMonitor.tsx`, `components/events/EventCard.tsx`, `hooks/useSpectrogram.ts`,
   `hooks/useDetector.ts`, `components/common/BBoxChip.tsx`, `api/`.
-- `zustand` queda sin uso en `web/package.json`; quitarlo exige regenerar `package-lock.json`
-  contra el registro npm privado del proyecto.
+- `zustand` se quitó de `web/package.json` (solo lo usaba el store de fusión). El lockfile pasó
+  del registro npm privado al público con las mismas versiones e `integrity`, y el CI compila y
+  prueba el dashboard.

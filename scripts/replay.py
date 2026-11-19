@@ -287,6 +287,8 @@ def main(argv=None) -> int:
         "encode_delay_s": args.encode_delay,
         # Fingerprints of the detector's behaviour: identical hashes mean the
         # per-window decisions and raw scores did not change (refactor guard).
+        # flags_sha1 is comparable across machines; scores_sha1 only on the
+        # same machine (floating-point results differ across CPU/BLAS).
         "flags_sha1": hashlib.sha1(flags.astype(np.uint8).tobytes()).hexdigest(),
         "scores_sha1": hashlib.sha1(
             np.round(raws, 6).astype(np.float64).tobytes()

@@ -64,8 +64,8 @@ npm run dev                 # http://localhost:5173
   `BBoxChip` "Movimiento principal"), `events/` (`EventCard` con espectrograma), `similarity/`.
 - **`src/pages/`** — `LiveMonitor`, `EventFeed`, `SimilaritySearch` (cargadas con `React.lazy`).
 
-> `zustand` sigue en `package.json` sin uso: quitarlo (`npm uninstall zustand`) requiere
-> regenerar `package-lock.json` contra el registro npm privado del proyecto.
+Las dependencias se instalan desde el npm público (`.npmrc`). El CI ejecuta `npm ci`,
+`npm test` y `npm run build` en cada PR.
 
 ## Despliegue en producción
 

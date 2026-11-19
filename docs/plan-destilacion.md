@@ -55,7 +55,7 @@ Cada paso debe pasar esta puerta antes del commit:
 
 ## Línea base (`main` en `47e2c13`)
 
-| Medida | Valor |
+| Medida | Valor (Linux x86, este entorno) |
 |---|---|
 | `pytest` | 279 passed |
 | `pylint src/` | 8.72/10 |
@@ -85,15 +85,13 @@ Determinismo comprobado: dos corridas seguidas de `events` dan hashes e informe 
 Diff total respecto a `main` en `src`, `tests`, `web/src` y `scripts`: 253 inserciones,
 3823 borrados.
 
-## Pendientes (puerta de merge en el Mac del usuario)
+## Pendientes
 
-- `cd web && npm install && npm test && npm run build`: los cambios del SPA (Pasos 1–3) no
-  se pudieron compilar aquí (dependencias en un registro npm privado).
-- `npm uninstall zustand` (queda sin uso) y commit del `package-lock.json` resultante.
-- Prueba real: API + pipeline + SPA; un sonido de unos segundos debe dar **un** evento con
-  frame, audio, espectrograma y "Movimiento principal".
-- Cargar los modelos reales (Wav2Vec2 + DINOv2): aquí Hugging Face está bloqueado; solo se
-  verificó que las clases importan con el entorno reducido.
+- ✅ Dashboard: `npm test` (11) y `npm run build` en verde, también en CI (ver bitácora).
+- ✅ `zustand` retirado.
+- ✅ Carga real de Wav2Vec2 + DINOv2 con el entorno reducido (validado en el Mac del usuario).
+- ⏳ **Prueba real** (a cargo del usuario): API + pipeline + SPA; un sonido de unos segundos
+  debe dar **un** evento con frame, audio, espectrograma y "Movimiento principal".
 
 ---
 
@@ -179,3 +177,22 @@ Diff total respecto a `main` en `src`, `tests`, `web/src` y `scripts`: 253 inser
   descripción nueva y el recuento de tests de esta rama (224). Comprobado como en el CI:
   `pylint src/ --fail-under=8.5` pasa (8.63) y `pytest` 224 passed; huella idéntica. Se
   actualiza el comentario del workflow que citaba la nota anterior (8.72).
+- **2026-11-19 · Validación en el Mac del usuario** (otro agente) — Wav2Vec2 + DINOv2 cargan con
+  el entorno reducido (primera carga 42 s con descarga; embedding de 1536 dims, norma 1, sin NaN;
+  sin frame la mitad visual queda en ceros). Huella `main` = rama en ambos escenarios.
+  - **Hallazgo:** en el Mac `flags_sha1` coincide con el de Linux, pero `scores_sha1` no
+    (`events`: `5031774e…` vs `6c0e6f5e…`; `quiet`: `a46bcf5c…` vs `d0f2f820…`), aunque dentro
+    de cada máquina `main` y la rama coinciden. El punto flotante varía entre CPU/BLAS:
+    `scores_sha1` solo es comparable en la misma máquina. Documentado en README, `CLAUDE.md` y
+    `scripts/replay.py`.
+  - `npm` quedó bloqueado también allí: sin credenciales para el registro privado.
+- **2026-11-19 · Dashboard al npm público** (autorizado por el usuario) — `web/package-lock.json`:
+  solo cambian las 383 URLs `resolved` al registro público; versiones e `integrity` idénticas, y
+  `npm ci` verificó cada tarball. `web/.npmrc` fija el registro público.
+  - **Línea base** (`main`, worktree temporal): 7 archivos / 19 tests de Vitest, build OK.
+  - **Rama:** 6 archivos / 11 tests, `tsc` + build OK **sin correcciones**: los cambios del SPA
+    hechos a mano en los Pasos 1–3 compilan. Los 8 tests de menos son los 5 de `fusion.test.ts` y
+    los 3 de `slowTileDisplay`, retirados con su código.
+  - `npm uninstall zustand`: salen `zustand` y `use-sync-external-store`, nada más cambia
+    (`useAnomalyStream` usa el `useSyncExternalStore` nativo de React). Tests y build en verde.
+  - CI: nuevo job `web` (`npm ci`, `npm test`, `npm run build`).

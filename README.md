@@ -460,7 +460,7 @@ dsp-anomaly-detection/
 │   ├── architecture/          # Visión general de la arquitectura vigente
 │   ├── plan-correcciones.md   # Núcleo corregido (ADR-0014): plan, bitácora, resultados
 │   └── plan-destilacion.md    # Módulos retirados (ADR-0015): plan, bitácora, resultados
-├── .github/workflows/ci.yml  # CI: pylint (--fail-under=8.5) + pytest en cada PR
+├── .github/workflows/ci.yml  # CI en cada PR: pylint (--fail-under=8.5) + pytest, y tests + build del dashboard
 ├── pyproject.toml · poetry.lock
 ├── LICENSE                    # MIT
 └── .env.example
@@ -629,7 +629,9 @@ poetry run python -m scripts.replay --wav grabacion.wav # WAV mono de 16 kHz, si
 Reporta, por sonido insertado, si se detectó, cuántos eventos generó y qué parte de sus
 ventanas cubrió; además falsas alarmas por hora, tiempo por ventana, ventanas perdidas en una
 cola simulada y una **huella** (`flags_sha1`, `scores_sha1`) que permite comprobar que un
-cambio no altera las decisiones del detector.
+cambio no altera las decisiones del detector. `flags_sha1` es comparable entre máquinas;
+`scores_sha1` solo en la misma máquina (los cálculos de punto flotante varían ligeramente según
+CPU y librería matemática: Linux x86 y macOS dan hashes distintos con el mismo código).
 
 ---
 

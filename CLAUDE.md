@@ -114,12 +114,12 @@ Tres páginas:
 ## Convenciones críticas
 
 - Los tests **no deben requerir micrófono ni cámara** — usar arrays numpy sintéticos (`Pipeline.process_window` + encoder mockeado)
-- Cambios en `src/detection/`, `src/dsp/` o el flujo de `process_window` deben conservar la **huella de detección**: comparar `flags_sha1`/`scores_sha1` de `scripts/replay.py` antes y después (ver `docs/plan-destilacion.md`)
+- Cambios en `src/detection/`, `src/dsp/` o el flujo de `process_window` deben conservar la **huella de detección**: comparar `flags_sha1`/`scores_sha1` de `scripts/replay.py` antes y después **en la misma máquina** (`scores_sha1` varía entre plataformas por punto flotante; `flags_sha1` no). Ver `docs/plan-destilacion.md`
 - `src/dsp/` y `src/vision/` son síncronos por diseño; no introducir `async` en esos módulos
 - `pytest-asyncio` configurado con `asyncio_mode = "auto"` — los tests async no necesitan `@pytest.mark.asyncio`
 - pylint desactiva C0114/C0115/C0116 (docstrings) — no añadir docstrings en módulos que no los tenían
 - Variables de entorno en `.env` de la raíz (copiar desde `.env.example`), **cargado automáticamente** por `python-dotenv` en el pipeline y la API: `EVENTS_DIR`, `DB_PATH`, `FAISS_PATH`, `SNAPSHOTS_DIR`, `API_BASE_URL`, `CORS_ORIGINS`, `ENABLE_DRIFT`, `ENABLE_SNAPSHOTS`, `EVENT_RELEASE_S`, `EVENT_MAX_DURATION_S`. Una variable exportada en el shell tiene prioridad. El SPA usa su propio `web/.env` (`VITE_API_BASE_URL`).
-- Las dependencias del SPA (`web/package-lock.json`) se resuelven contra un registro npm privado; regenerar el lockfile requiere acceso a él.
+- Las dependencias del SPA se resuelven contra el npm público (`web/.npmrc`); el lockfile no debe apuntar a registros privados. El CI (`.github/workflows/ci.yml`) corre pylint + pytest y `npm ci && npm test && npm run build`.
 
 ---
 

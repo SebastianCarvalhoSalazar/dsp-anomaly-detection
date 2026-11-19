@@ -126,7 +126,9 @@ fallan ahí (3 de 4 en detección, 7 de 7 en pipeline) y pasan con el corregido.
 
 ## Pendientes y siguientes pasos
 
-- **SPA sin validar.** `web/package-lock.json` resuelve los 383 paquetes contra un
+- **SPA sin validar.** *(Resuelto después: el lockfile pasó al npm público y el SPA se
+  compila y prueba en CI; ver [`plan-destilacion.md`](plan-destilacion.md).)*
+  `web/package-lock.json` resolvía los 383 paquetes contra un
   registro npm privado (`npm.artifacts.furycloud.io`) que no es accesible desde el
   entorno de trabajo; el intento de instalar desde el registro público fue
   bloqueado por la política de permisos de la sesión. Los cambios que tocan al SPA
