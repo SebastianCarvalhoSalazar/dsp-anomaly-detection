@@ -85,6 +85,8 @@ class BaseAnomalyDetector:
         self._is_fitted = False
         self._fitting = False  # guard: a fit is being computed (H1)
         self._samples_since_refit = 0
+        # Windows scored since construction / last reset (AnomalyResult.window_index)
+        self._window_count = 0
         self._feature_dim: Optional[int] = None
         self._lock = threading.Lock()
 
@@ -157,6 +159,10 @@ class BaseAnomalyDetector:
             if appended:
                 self._buffer.append(fv.copy())
             buf_len = len(self._buffer)
+            # Running window index. (It used to be buf_len - 1, which froze at
+            # buffer_size - 1 = 499 once the buffer was full.)
+            window_index = self._window_count
+            self._window_count += 1
 
             need_fit = False
             is_initial = False
@@ -219,7 +225,7 @@ class BaseAnomalyDetector:
                     is_anomaly=False,
                     is_fitted=False,
                     timestamp=ts,
-                    window_index=buf_len - 1,
+                    window_index=window_index,
                     feature_vector=fv,
                 )
 
@@ -258,7 +264,7 @@ class BaseAnomalyDetector:
             is_anomaly=is_anomaly,
             is_fitted=True,
             timestamp=ts,
-            window_index=buf_len - 1,
+            window_index=window_index,
             feature_vector=fv,
         )
 
@@ -360,6 +366,7 @@ class BaseAnomalyDetector:
         self._is_fitted = False
         self._fitting = False
         self._samples_since_refit = 0
+        self._window_count = 0
         self._feature_dim = None
         self._smoothed_score = 0.0
         self._consecutive_anomalies = 0

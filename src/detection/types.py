@@ -12,5 +12,5 @@ class AnomalyResult:
     is_anomaly: bool          # True when anomaly_score exceeds the detector threshold
     is_fitted: bool           # False during warmup (buffer not yet full)
     timestamp: float          # Unix timestamp
-    window_index: int
+    window_index: int         # windows scored since the detector started or was reset
     feature_vector: np.ndarray = field(repr=False)  # shape (feature_dim,)
